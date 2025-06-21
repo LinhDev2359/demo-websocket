@@ -1,0 +1,82 @@
+services:
+  # Spring Boot Application
+  app:
+    build: 
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8080:8080"
+    environment:
+      - DATABASE_URL=jdbc:mysql://mysql:3306/wallet_system?useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true
+      - DATABASE_USERNAME=wallet_user
+      - DATABASE_PASSWORD=wallet_pass
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - ENVIRONMENT=dev
+      - JWT_SECRET=myDevSecretKey12345678901234567890123456789012345678901234567890
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - wallet-network
+    restart: unless-stopped
+
+  # MySQL Database
+  mysql:
+    image: mysql:8.0
+    container_name: wallet-mysql
+    ports:
+      - "3306:3306"
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: wallet_system
+      MYSQL_USER: wallet_user
+      MYSQL_PASSWORD: wallet_pass
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./mysql/init-dev.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    command: >
+      --character-set-server=utf8mb4
+      --collation-server=utf8mb4_unicode_ci
+      --default-authentication-plugin=mysql_native_password
+      --log-bin-trust-function-creators=1
+    networks:
+      - wallet-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-proot"]
+      timeout: 20s
+      retries: 10
+      interval: 10s
+      start_period: 40s
+
+  # Redis Cache
+  redis:
+    image: redis:7-alpine
+    container_name: wallet-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes --maxmemory 1gb --maxmemory-policy allkeys-lru
+    networks:
+      - wallet-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      timeout: 5s
+      retries: 5
+      interval: 10s
+      start_period: 30s
+
+networks:
+  wallet-network:
+    driver: bridge
+
+volumes:
+  mysql_data:
+    driver: local
+  redis_data:
+    driver: local

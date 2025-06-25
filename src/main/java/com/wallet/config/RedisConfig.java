@@ -21,7 +21,7 @@ import org.springframework.data.redis.serializer.StringRedisSerializer;
  * 3. Environment-specific configuration
  * 4. Connection pooling optimization
  */
-@Configuration
+// @Configuration  // Temporarily disabled for Redis debugging
 public class RedisConfig {
 
     @Value("${spring.data.redis.host:localhost}")

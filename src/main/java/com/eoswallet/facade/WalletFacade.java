@@ -7,6 +7,7 @@ import com.eoswallet.dto.WalletUpdateRequest;
 import com.eoswallet.dto.BalanceResponse;
 import com.eoswallet.dto.TransferRequest;
 import com.eoswallet.dto.TransferResponse;
+import com.wallet.dto.WalletTokensResponse;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 
@@ -15,40 +16,49 @@ import java.util.List;
 
 public interface WalletFacade {
     
-    WalletCreateResponse createWallet(Long userId, WalletCreateRequest request);
+    WalletCreateResponse createWallet(String userId, WalletCreateRequest request);
     
-    WalletResponse getWallet(Long walletId, Long userId);
+    WalletResponse getWallet(Long walletId, String userId);
     
-    Page<WalletResponse> getUserWallets(Long userId, Pageable pageable);
+    Page<WalletResponse> getUserWallets(String userId, Pageable pageable);
     
-    WalletResponse updateWallet(Long walletId, Long userId, WalletUpdateRequest request);
+    WalletResponse updateWallet(Long walletId, String userId, WalletUpdateRequest request);
     
-    void deleteWallet(Long walletId, Long userId);
+    void deleteWallet(Long walletId, String userId);
     
-    WalletResponse setPrimaryWallet(Long walletId, Long userId);
+    WalletResponse setPrimaryWallet(Long walletId, String userId);
     
-    WalletResponse getPrimaryWallet(Long userId);
+    WalletResponse getPrimaryWallet(String userId);
     
-    BalanceResponse getWalletBalance(Long walletId, Long userId);
+    BalanceResponse getWalletBalance(Long walletId, String userId);
     
-    List<BalanceResponse> getAllUserBalances(Long userId);
+    List<BalanceResponse> getAllUserBalances(String userId);
     
     BalanceResponse updateBalance(Long walletId, BigDecimal amount, String operation);
     
     TransferResponse transferBetweenWallets(Long fromWalletId, Long toWalletId, 
-                                          BigDecimal amount, Long userId);
+                                          BigDecimal amount, String userId);
     
-    void syncWalletWithBlockchain(Long walletId, Long userId);
+    void syncWalletWithBlockchain(Long walletId, String userId);
     
-    void syncAllUserWalletsWithBlockchain(Long userId);
+    void syncAllUserWalletsWithBlockchain(String userId);
     
     boolean validateEosAddress(String eosAddress);
     
-    WalletResponse importExistingWallet(Long userId, String privateKey, String eosAddress);
+    WalletResponse importExistingWallet(String userId, String privateKey, String eosAddress);
     
-    String exportWalletPrivateKey(Long walletId, Long userId, String password);
+    String exportWalletPrivateKey(Long walletId, String userId, String password);
     
-    void backupWallet(Long walletId, Long userId);
+    void backupWallet(Long walletId, String userId);
     
-    WalletResponse restoreWallet(Long userId, String backupData, String password);
+    WalletResponse restoreWallet(String userId, String backupData, String password);
+    
+    /**
+     * Get all tokens for a specific wallet
+     * 
+     * @param walletId wallet ID
+     * @param userId user ID for authorization
+     * @return WalletTokensResponse with list of tokens
+     */
+    WalletTokensResponse getWalletTokens(Long walletId, String userId);
 }

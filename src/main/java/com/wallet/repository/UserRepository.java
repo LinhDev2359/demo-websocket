@@ -1,9 +1,11 @@
 package com.wallet.repository;
 
 import com.wallet.entity.User;
+import com.wallet.entity.UserStatus;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
@@ -90,7 +92,7 @@ public interface UserRepository extends JpaRepository<User, Long> {
      * @param pageable pagination info
      * @return Page of Users
      */
-    Page<User> findByStatus(User.UserStatus status, Pageable pageable);
+    Page<User> findByStatus(UserStatus status, Pageable pageable);
     
     /**
      * Tìm users được tạo trong khoảng thời gian
@@ -112,23 +114,13 @@ public interface UserRepository extends JpaRepository<User, Long> {
     Page<User> findByEmailVerified(Boolean emailVerified, Pageable pageable);
     
     /**
-     * Custom query để tìm active users với last login gần đây
-     * 
-     * @param days số ngày gần đây
-     * @param pageable pagination info
-     * @return Page of active Users
-     */
-    @Query("SELECT u FROM User u WHERE u.status = 'ACTIVE' AND u.lastLoginAt >= :sinceDate")
-    Page<User> findActiveUsersWithRecentLogin(@Param("sinceDate") LocalDateTime sinceDate, Pageable pageable);
-    
-    /**
      * Custom query để count users theo status
      * 
      * @param status user status
      * @return count
      */
     @Query("SELECT COUNT(u) FROM User u WHERE u.status = :status")
-    long countByStatus(@Param("status") User.UserStatus status);
+    long countByStatus(@Param("status") UserStatus status);
     
     /**
      * Custom query để update last login time
@@ -138,6 +130,17 @@ public interface UserRepository extends JpaRepository<User, Long> {
      * @param lastLoginAt last login time
      * @return number of updated records
      */
+    @Modifying
     @Query("UPDATE User u SET u.lastLoginAt = :lastLoginAt WHERE u.userId = :userId")
     int updateLastLoginTime(@Param("userId") String userId, @Param("lastLoginAt") LocalDateTime lastLoginAt);
+    
+    /**
+     * Find active users with recent login
+     * 
+     * @param sinceDate date threshold
+     * @param pageable pagination info
+     * @return Page of Users
+     */
+    @Query("SELECT u FROM User u WHERE u.status = com.wallet.entity.UserStatus.ACTIVE AND u.lastLoginAt >= :sinceDate")
+    Page<User> findActiveUsersWithRecentLogin(@Param("sinceDate") LocalDateTime sinceDate, Pageable pageable);
 }

@@ -85,7 +85,8 @@ public class JwtRequestFilter extends OncePerRequestFilter {
                         // Set authentication context
                         setAuthenticationContext(userDetails, request);
                         
-                        log.debug("JWT authentication successful for user: {}", username);
+                        log.info("JWT authentication successful for user: {} | Authorities: {} | Enabled: {} | AccountNonLocked: {}", 
+                                username, userDetails.getAuthorities(), userDetails.isEnabled(), userDetails.isAccountNonLocked());
                     } else {
                         log.warn("JWT token validation failed for user: {}", username);
                     }

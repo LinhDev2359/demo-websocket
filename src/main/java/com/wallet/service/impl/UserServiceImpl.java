@@ -1,6 +1,7 @@
 package com.wallet.service.impl;
 
 import com.wallet.entity.User;
+import com.wallet.entity.UserStatus;
 import com.wallet.repository.UserRepository;
 import com.wallet.service.UserService;
 import lombok.RequiredArgsConstructor;
@@ -12,6 +13,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -36,10 +38,20 @@ public class UserServiceImpl implements UserService {
     
     @Override
     public User createUser(String username, String email, String password, String firstName, String lastName) {
-        log.info("Creating new user with username: {} and email: {}", username, email);
+        return createUserWithId(generateUserId(), username, email, password, firstName, lastName);
+    }
+    
+    @Override
+    public User createUserWithId(String userId, String username, String email, String password, String firstName, String lastName) {
+        log.info("Creating new user with userId: {}, username: {} and email: {}", userId, username, email);
         
         // Validate input
         validateUserInput(username, email, password);
+        
+        // Check if userId already exists
+        if (getUserById(userId).isPresent()) {
+            throw new RuntimeException("UserId already exists: " + userId);
+        }
         
         // Check if username or email already exists
         if (!isUsernameAvailable(username)) {
@@ -52,13 +64,13 @@ public class UserServiceImpl implements UserService {
         
         // Create new user
         User user = new User();
-        user.setUserId(generateUserId());
+        user.setUserId(userId);
         user.setUsername(username);
         user.setEmail(email);
         user.setPasswordHash(passwordEncoder.encode(password));
         user.setFirstName(firstName);
         user.setLastName(lastName);
-        user.setStatus(User.UserStatus.ACTIVE);
+        user.setStatus(UserStatus.ACTIVE);
         user.setEmailVerified(false);
         
         User savedUser = userRepository.save(user);
@@ -119,7 +131,7 @@ public class UserServiceImpl implements UserService {
     }
     
     @Override
-    public User updateUserStatus(String userId, User.UserStatus status) {
+    public User updateUserStatus(String userId, UserStatus status) {
         log.info("Updating status to {} for user: {}", status, userId);
         
         User user = getUserById(userId)
@@ -171,7 +183,7 @@ public class UserServiceImpl implements UserService {
     
     @Override
     @Transactional(readOnly = true)
-    public Page<User> getUsersByStatus(User.UserStatus status, Pageable pageable) {
+    public Page<User> getUsersByStatus(UserStatus status, Pageable pageable) {
         return userRepository.findByStatus(status, pageable);
     }
     
@@ -184,16 +196,22 @@ public class UserServiceImpl implements UserService {
     
     @Override
     @Transactional(readOnly = true)
+    public List<User> getAllUsers() {
+        return userRepository.findAll();
+    }
+    
+    @Override
+    @Transactional(readOnly = true)
     public UserStatistics getUserStatistics() {
         long totalUsers = userRepository.count();
-        long activeUsers = userRepository.countByStatus(User.UserStatus.ACTIVE);
-        long inactiveUsers = userRepository.countByStatus(User.UserStatus.INACTIVE);
-        long suspendedUsers = userRepository.countByStatus(User.UserStatus.SUSPENDED);
+        long activeUsers = userRepository.countByStatus(UserStatus.ACTIVE);
+        long inactiveUsers = userRepository.countByStatus(UserStatus.INACTIVE);
+        long suspendedUsers = userRepository.countByStatus(UserStatus.SUSPENDED);
         
         // Count verified users
         long verifiedUsers = userRepository.findByEmailVerified(true, Pageable.unpaged()).getTotalElements();
         
-        return new UserStatistics(totalUsers, activeUsers, inactiveUsers, suspendedUsers, verifiedUsers);
+        return new UserService.UserStatistics(totalUsers, activeUsers, inactiveUsers, suspendedUsers, verifiedUsers);
     }
     
     /**

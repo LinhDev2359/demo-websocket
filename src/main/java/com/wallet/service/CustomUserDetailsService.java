@@ -1,6 +1,8 @@
 package com.wallet.service;
 
 import com.wallet.entity.User;
+import com.wallet.entity.UserStatus;
+import com.wallet.security.CustomUserPrincipal;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.security.core.GrantedAuthority;
@@ -14,6 +16,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
+import java.util.Optional;
 
 /**
  * Custom UserDetailsService Implementation
@@ -42,10 +45,31 @@ public class CustomUserDetailsService implements UserDetailsService {
     @Override
     @Transactional(readOnly = true)
     public UserDetails loadUserByUsername(String usernameOrEmail) throws UsernameNotFoundException {
-        log.debug("Loading user by username: {}", usernameOrEmail);
+        log.info("Loading user by username: {}", usernameOrEmail);
         
-        User user = userService.getUserByUsernameOrEmail(usernameOrEmail)
-            .orElseThrow(() -> new UsernameNotFoundException("User not found: " + usernameOrEmail));
+        Optional<User> userOptional = userService.getUserByUsernameOrEmail(usernameOrEmail);
+        
+        if (userOptional.isEmpty()) {
+            log.warn("User not found in database: {}", usernameOrEmail);
+            
+            // Debug: list all users to see what's in database
+            try {
+                List<User> allUsers = userService.getAllUsers();
+                log.info("Total users in database: {}", allUsers.size());
+                for (User u : allUsers) {
+                    log.info("User in DB - ID: {}, Username: {}, Email: {}, Status: {}", 
+                            u.getUserId(), u.getUsername(), u.getEmail(), u.getStatus());
+                }
+            } catch (Exception e) {
+                log.error("Error listing users: {}", e.getMessage());
+            }
+            
+            throw new UsernameNotFoundException("User not found: " + usernameOrEmail);
+        }
+        
+        User user = userOptional.get();
+        log.info("Found user - ID: {}, Username: {}, Email: {}, Status: {}, EmailVerified: {}", 
+                user.getUserId(), user.getUsername(), user.getEmail(), user.getStatus(), user.getEmailVerified());
         
         return createUserPrincipal(user);
     }
@@ -57,17 +81,7 @@ public class CustomUserDetailsService implements UserDetailsService {
      * @return UserDetails object
      */
     private UserDetails createUserPrincipal(User user) {
-        Collection<GrantedAuthority> authorities = getAuthorities(user);
-        
-        return org.springframework.security.core.userdetails.User.builder()
-                .username(user.getUsername())
-                .password(user.getPasswordHash())
-                .authorities(authorities)
-                .accountExpired(false)
-                .accountLocked(user.getStatus() == User.UserStatus.SUSPENDED)
-                .credentialsExpired(false)
-                .disabled(user.getStatus() == User.UserStatus.INACTIVE)
-                .build();
+        return new CustomUserPrincipal(user);
     }
 
     /**
@@ -107,7 +121,7 @@ public class CustomUserDetailsService implements UserDetailsService {
         user.setPasswordHash("$2a$10$N.zmdr9k7uOCQb376NoUnuTJ8iYqiSfFVMLVZqpubyYbee7rhMFz");
         user.setFirstName("Test");
         user.setLastName("User");
-        user.setStatus(User.UserStatus.ACTIVE);
+        user.setStatus(UserStatus.ACTIVE);
         user.setEmailVerified(true);
         
         return user;

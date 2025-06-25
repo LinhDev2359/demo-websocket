@@ -2,6 +2,7 @@ package com.eoswallet.facade.impl;
 
 import com.eoswallet.dto.*;
 import com.wallet.entity.User;
+import com.wallet.entity.UserStatus;
 import com.eoswallet.facade.UserFacade;
 import com.wallet.service.UserService;
 import com.wallet.service.CustomUserDetailsService;
@@ -42,26 +43,24 @@ public class UserFacadeImpl implements UserFacade {
 
     @Override
     public UserRegistrationResponse registerUser(UserRegistrationRequest request) {
+        // Tách fullName thành firstName và lastName
+        String[] names = request.getFullName().split(" ", 2);
+        String firstName = names[0];
+        String lastName = names.length > 1 ? names[1] : "";
+        
         // Tạo user mới thông qua UserService
         User user = userService.createUser(
             request.getEmail(), 
             request.getEmail(), 
             request.getPassword(), 
-            request.getFullName(), 
-            ""
+            firstName, 
+            lastName
         );
-        
-        // Generate JWT tokens using UserDetailsService
-        UserDetails userDetails = userDetailsService.loadUserByUsername(user.getEmail());
-        String accessToken = jwtTokenUtil.generateAccessToken(userDetails, user.getUserId(), user.getEmail());
-        String refreshToken = jwtTokenUtil.generateRefreshToken(userDetails, user.getUserId());
         
         return UserRegistrationResponse.builder()
                 .userId(user.getId())
                 .email(user.getEmail())
                 .fullName(user.getFirstName() + " " + user.getLastName())
-                .accessToken(accessToken)
-                .refreshToken(refreshToken)
                 .message("User registered successfully")
                 .build();
     }
@@ -110,7 +109,7 @@ public class UserFacadeImpl implements UserFacade {
                 .email(user.getEmail())
                 .fullName(user.getFirstName() + " " + user.getLastName())
                 .role("USER")
-                .isActive(user.getStatus() == User.UserStatus.ACTIVE)
+                .isActive(user.getStatus() == UserStatus.ACTIVE)
                 .createdAt(user.getCreatedAt())
                 .updatedAt(user.getUpdatedAt())
                 .build();
@@ -130,7 +129,7 @@ public class UserFacadeImpl implements UserFacade {
                 .email(user.getEmail())
                 .fullName(user.getFirstName() + " " + user.getLastName())
                 .role("USER")
-                .isActive(user.getStatus() == User.UserStatus.ACTIVE)
+                .isActive(user.getStatus() == UserStatus.ACTIVE)
                 .createdAt(user.getCreatedAt())
                 .updatedAt(user.getUpdatedAt())
                 .build();
@@ -138,12 +137,12 @@ public class UserFacadeImpl implements UserFacade {
 
     @Override
     public void deactivateUser(Long userId) {
-        userService.updateUserStatus(userId.toString(), User.UserStatus.INACTIVE);
+        userService.updateUserStatus(userId.toString(), UserStatus.INACTIVE);
     }
 
     @Override
     public void reactivateUser(Long userId) {
-        userService.updateUserStatus(userId.toString(), User.UserStatus.ACTIVE);
+        userService.updateUserStatus(userId.toString(), UserStatus.ACTIVE);
     }
 
     @Override
@@ -155,7 +154,7 @@ public class UserFacadeImpl implements UserFacade {
                 .email(user.getEmail())
                 .fullName(user.getFirstName() + " " + user.getLastName())
                 .role("USER")
-                .isActive(user.getStatus() == User.UserStatus.ACTIVE)
+                .isActive(user.getStatus() == UserStatus.ACTIVE)
                 .createdAt(user.getCreatedAt())
                 .updatedAt(user.getUpdatedAt())
                 .build());

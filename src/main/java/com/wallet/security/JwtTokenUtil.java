@@ -3,6 +3,8 @@ package com.wallet.security;
 import io.jsonwebtoken.*;
 import io.jsonwebtoken.security.Keys;
 import lombok.extern.slf4j.Slf4j;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.stereotype.Component;
@@ -26,6 +28,8 @@ import java.util.function.Function;
 @Component
 @Slf4j
 public class JwtTokenUtil {
+    
+    private static final Logger log = LoggerFactory.getLogger(JwtTokenUtil.class);
     
     // JWT Configuration từ application.yml
     @Value("${jwt.secret}")

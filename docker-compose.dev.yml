@@ -34,15 +34,13 @@ services:
     container_name: ${COMPOSE_PROJECT_NAME:-wallet-system}-redis-dev
     ports:
       - "6379:6379"
-    environment:
-      REDIS_PASSWORD: ${REDIS_PASSWORD:-dev_redis_pass_2024}
     volumes:
       - redis_dev_data:/data
       - ./redis/redis-dev.conf:/usr/local/etc/redis/redis.conf:ro
-    command: redis-server /usr/local/etc/redis/redis.conf --requirepass ${REDIS_PASSWORD:-dev_redis_pass_2024}
+    command: redis-server /usr/local/etc/redis/redis.conf
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-dev_redis_pass_2024}", "ping"]
+      test: ["CMD", "redis-cli", "ping"]
       timeout: 5s
       retries: 3
       interval: 10s

@@ -4,7 +4,18 @@
       "Bash(mkdir:*)",
       "Bash(mv:*)",
       "Bash(chmod:*)",
-      "Bash(docker-compose:*)"
+      "Bash(docker-compose:*)",
+      "Bash(export:*)",
+      "Bash(sudo apt:*)",
+      "Bash(sudo apt install:*)",
+      "Bash(find:*)",
+      "Bash(grep:*)",
+      "Bash(cat:*)",
+      "Bash(rm:*)",
+      "Bash(ls:*)",
+      "Bash(./mvnw clean:*)",
+      "Bash(/mnt/c/jdk-17.0.12/bin/java.exe:*)",
+      "Bash(./test-compile.sh:*)"
     ],
     "deny": []
   }

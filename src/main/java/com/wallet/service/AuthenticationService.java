@@ -1,5 +1,6 @@
 package com.wallet.service;
 
+import com.wallet.security.CustomUserPrincipal;
 import com.wallet.security.JwtTokenUtil;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -72,7 +73,7 @@ public class AuthenticationService {
             log.warn("Authentication failed for user: {} - Invalid credentials", username);
             throw new BadCredentialsException("Invalid username or password");
         } catch (Exception e) {
-            log.error("Authentication error for user: {} - {}", username, e.getMessage());
+            log.error("Authentication error for user: {} - {}", username, e.getMessage(), e);
             throw new RuntimeException("Authentication failed", e);
         }
     }
@@ -220,25 +221,27 @@ public class AuthenticationService {
 
     /**
      * Extract user ID từ UserDetails
-     * TODO: Implement khi có proper UserDetails implementation
      * 
      * @param userDetails user details
      * @return user ID
      */
     private String extractUserIdFromUserDetails(UserDetails userDetails) {
-        // Temporary implementation
-        return "user_000001";
+        if (userDetails instanceof CustomUserPrincipal) {
+            return ((CustomUserPrincipal) userDetails).getUserId();
+        }
+        throw new IllegalArgumentException("Unsupported UserDetails type");
     }
 
     /**
      * Extract email từ UserDetails
-     * TODO: Implement khi có proper UserDetails implementation
      * 
      * @param userDetails user details
      * @return email
      */
     private String extractEmailFromUserDetails(UserDetails userDetails) {
-        // Temporary implementation
-        return "user@example.com";
+        if (userDetails instanceof CustomUserPrincipal) {
+            return ((CustomUserPrincipal) userDetails).getEmail();
+        }
+        throw new IllegalArgumentException("Unsupported UserDetails type");
     }
 }

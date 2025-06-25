@@ -18,7 +18,7 @@ import org.springframework.data.redis.connection.RedisConnectionFactory;
  * 2. Graceful degradation nếu Redis unavailable
  * 3. Detailed health information
  */
-@Configuration
+// @Configuration  // Temporarily disabled for Redis debugging
 @Slf4j
 public class RedisHealthConfig {
 
@@ -26,7 +26,7 @@ public class RedisHealthConfig {
      * Custom Redis Health Indicator
      * Thay thế default Redis health check với better error handling
      */
-    @Bean
+    // @Bean  // Temporarily disabled for Redis debugging
     public HealthIndicator redisHealthIndicator(RedisConnectionFactory redisConnectionFactory) {
         return () -> {
             try {

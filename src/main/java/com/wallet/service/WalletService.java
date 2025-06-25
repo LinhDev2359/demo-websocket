@@ -1,6 +1,7 @@
 package com.wallet.service;
 
 import com.wallet.entity.Wallet;
+import com.wallet.entity.WalletStatus;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 
@@ -93,7 +94,7 @@ public interface WalletService {
      * @return updated Wallet
      * @throws RuntimeException nếu wallet không thuộc về user
      */
-    Wallet updateWalletStatus(String userId, String walletAddress, Wallet.WalletStatus status);
+    Wallet updateWalletStatus(String userId, String walletAddress, WalletStatus status);
     
     /**
      * Delete wallet (soft delete)
@@ -143,7 +144,7 @@ public interface WalletService {
      * @param status new status
      * @return number of updated wallets
      */
-    int bulkUpdateWalletStatus(List<String> walletAddresses, Wallet.WalletStatus status);
+    int bulkUpdateWalletStatus(List<String> walletAddresses, WalletStatus status);
     
     /**
      * Get wallet statistics cho user

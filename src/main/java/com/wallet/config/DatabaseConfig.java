@@ -23,7 +23,7 @@ import java.util.Properties;
  * Master: Write operations
  * Slave: Read operations (when available)
  */
-@Configuration
+// @Configuration  // Temporarily disabled - use Spring Boot auto-configuration
 @EnableJpaRepositories(
     basePackages = "com.wallet.repository",
     entityManagerFactoryRef = "entityManagerFactory",

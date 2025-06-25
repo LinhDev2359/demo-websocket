@@ -1,6 +1,8 @@
 package com.wallet.repository;
 
 import com.wallet.entity.Wallet;
+import com.wallet.entity.WalletStatus;
+import com.wallet.entity.WalletType;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
@@ -33,30 +35,26 @@ public interface WalletRepository extends JpaRepository<Wallet, Long> {
      */
     Optional<Wallet> findByWalletAddress(String walletAddress);
     
-    /**
-     * Tìm tất cả wallets của user với pagination
+    /*
+     * ❌ REMOVED: Old entity relationship method
+     * Use findByUserId(String userId, Pageable pageable) instead
      * 
-     * @param userId user ID
-     * @param pageable pagination info
-     * @return Page of Wallets
+     * Page<Wallet> findByUserUserId(String userId, Pageable pageable);
      */
-    Page<Wallet> findByUserId(String userId, Pageable pageable);
     
-    /**
-     * Tìm active wallets của user
+    /*
+     * ❌ REMOVED: Old entity relationship method
+     * Use findByUserIdAndStatus(String userId, WalletStatus status) instead
      * 
-     * @param userId user ID
-     * @return List of active Wallets
+     * List<Wallet> findByUserUserIdAndStatus(String userId, WalletStatus status);
      */
-    List<Wallet> findByUserIdAndStatus(String userId, Wallet.WalletStatus status);
     
-    /**
-     * Tìm primary wallet của user
+    /*
+     * ❌ REMOVED: Old entity relationship method
+     * Use UserWalletRepository.findByUserIdAndIsPrimaryTrueAndStatus() instead
      * 
-     * @param userId user ID
-     * @return Optional primary Wallet
+     * Optional<Wallet> findByUserUserIdAndIsPrimaryTrue(String userId);
      */
-    Optional<Wallet> findByUserIdAndIsPrimaryTrue(String userId);
     
     /**
      * Tìm wallets theo wallet type
@@ -65,7 +63,7 @@ public interface WalletRepository extends JpaRepository<Wallet, Long> {
      * @param pageable pagination info
      * @return Page of Wallets
      */
-    Page<Wallet> findByWalletType(Wallet.WalletType walletType, Pageable pageable);
+    Page<Wallet> findByWalletType(WalletType walletType, Pageable pageable);
     
     /**
      * Check xem wallet address đã tồn tại chưa
@@ -75,22 +73,19 @@ public interface WalletRepository extends JpaRepository<Wallet, Long> {
      */
     boolean existsByWalletAddress(String walletAddress);
     
-    /**
-     * Count số wallets của user
+    /*
+     * ❌ REMOVED: Old entity relationship method
+     * Use countByUserId(String userId) instead
      * 
-     * @param userId user ID
-     * @return số lượng wallets
+     * long countByUserUserId(String userId);
      */
-    long countByUserId(String userId);
     
-    /**
-     * Count active wallets của user
+    /*
+     * ❌ REMOVED: Old entity relationship method
+     * Use countByUserIdAndStatus(String userId, WalletStatus status) instead
      * 
-     * @param userId user ID
-     * @param status wallet status
-     * @return số lượng active wallets
+     * long countByUserUserIdAndStatus(String userId, WalletStatus status);
      */
-    long countByUserIdAndStatus(String userId, Wallet.WalletStatus status);
     
     /**
      * Tìm wallets được tạo trong khoảng thời gian
@@ -104,23 +99,28 @@ public interface WalletRepository extends JpaRepository<Wallet, Long> {
     
     /**
      * Custom query để tìm wallets với balance > 0
-     * Join với Balance table
+     * ✅ FIXED: Use native SQL for Junction Tables (simpler approach)
      * 
      * @param userId user ID
      * @return List of Wallets có balance
      */
-    @Query("SELECT DISTINCT w FROM Wallet w JOIN Balance b ON w.walletAddress = b.walletAddress " +
-           "WHERE w.userId = :userId AND w.status = 'ACTIVE' AND b.balance > 0")
+    @Query(value = "SELECT DISTINCT w.* FROM wallets w " +
+                   "INNER JOIN wallet_balances wb ON w.id = wb.wallet_id " +
+                   "INNER JOIN balances b ON wb.balance_id = b.id " +
+                   "WHERE w.user_id = :userId AND w.status = 0 " +
+                   "AND wb.status = 0 AND b.balance > 0",
+           nativeQuery = true)
     List<Wallet> findWalletsWithBalance(@Param("userId") String userId);
     
     /**
      * Custom query để get wallet statistics
+     * ✅ FIXED: Use simple userId field instead of entity relationship
      * 
      * @param userId user ID
      * @return wallet statistics as Object array
      */
     @Query("SELECT COUNT(w), " +
-           "SUM(CASE WHEN w.status = 'ACTIVE' THEN 1 ELSE 0 END), " +
+           "SUM(CASE WHEN w.status = com.wallet.entity.WalletStatus.ACTIVE THEN 1 ELSE 0 END), " +
            "SUM(CASE WHEN w.isPrimary = true THEN 1 ELSE 0 END) " +
            "FROM Wallet w WHERE w.userId = :userId")
     Object[] getWalletStatistics(@Param("userId") String userId);
@@ -136,17 +136,18 @@ public interface WalletRepository extends JpaRepository<Wallet, Long> {
     @Query("UPDATE Wallet w SET w.status = :status, w.updatedAt = CURRENT_TIMESTAMP " +
            "WHERE w.walletAddress IN :walletAddresses")
     int bulkUpdateStatus(@Param("walletAddresses") List<String> walletAddresses, 
-                        @Param("status") Wallet.WalletStatus status);
+                        @Param("status") WalletStatus status);
     
     /**
      * Find wallets by user with ordering
      * Order by primary first, then by creation date
+     * ✅ FIXED: Use simple userId field instead of entity relationship
      * 
      * @param userId user ID
      * @return List of Wallets ordered
      */
     @Query("SELECT w FROM Wallet w " +
-           "WHERE w.userId = :userId AND w.status = 'ACTIVE' " +
+           "WHERE w.userId = :userId AND w.status = com.wallet.entity.WalletStatus.ACTIVE " +
            "ORDER BY w.isPrimary DESC, w.createdAt ASC")
     List<Wallet> findByUserIdWithBalances(@Param("userId") String userId);
     
@@ -156,15 +157,14 @@ public interface WalletRepository extends JpaRepository<Wallet, Long> {
      * @param status wallet status
      * @return count of wallets
      */
-    long countByStatus(Wallet.WalletStatus status);
+    long countByStatus(WalletStatus status);
     
-    /**
-     * Count primary wallets for user
+    /*
+     * ❌ REMOVED: Old entity relationship method
+     * Use UserWalletRepository.countByUserIdAndIsPrimaryTrueAndStatus() instead
      * 
-     * @param userId user ID
-     * @return count of primary wallets
+     * long countByUserUserIdAndIsPrimaryTrue(String userId);
      */
-    long countByUserIdAndIsPrimaryTrue(String userId);
     
     /**
      * Count primary wallets globally
@@ -172,4 +172,55 @@ public interface WalletRepository extends JpaRepository<Wallet, Long> {
      * @return count of primary wallets
      */
     long countByIsPrimaryTrue();
+    
+    // ✅ NEW METHODS: Added to support refactored entity structure
+    
+    /**
+     * Find wallets by userId (simple string field)
+     */
+    List<Wallet> findByUserId(String userId);
+    
+    /**
+     * Find wallets by userId with pagination
+     */
+    Page<Wallet> findByUserId(String userId, Pageable pageable);
+    
+    /**
+     * Find wallets by userId and status
+     */
+    List<Wallet> findByUserIdAndStatus(String userId, WalletStatus status);
+    
+    /**
+     * Count wallets by userId
+     */
+    long countByUserId(String userId);
+    
+    /**
+     * Count wallets by userId and status
+     */
+    long countByUserIdAndStatus(String userId, WalletStatus status);
+    
+    /**
+     * Find wallets by status (for global queries)
+     */
+    List<Wallet> findByStatus(WalletStatus status);
+    
+    /**
+     * Find all active wallets for balance sync
+     * 
+     * @param pageable pagination info
+     * @return Page of active wallets
+     */
+    @Query("SELECT w FROM Wallet w WHERE w.status = com.wallet.entity.WalletStatus.ACTIVE ORDER BY w.updatedAt ASC")
+    Page<Wallet> findAllActiveWallets(Pageable pageable);
+    
+    /**
+     * Find primary wallet by userId, walletType and isPrimary flag
+     * 
+     * @param userId user ID
+     * @param walletType wallet type
+     * @param isPrimary primary flag
+     * @return Optional primary wallet
+     */
+    Optional<Wallet> findByUserIdAndWalletTypeAndIsPrimary(String userId, WalletType walletType, Boolean isPrimary);
 }

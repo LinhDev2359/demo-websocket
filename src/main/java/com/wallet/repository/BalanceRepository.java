@@ -1,6 +1,7 @@
 package com.wallet.repository;
 
 import com.wallet.entity.Balance;
+import com.wallet.entity.TokenType;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
@@ -27,22 +28,19 @@ import java.util.Optional;
 @Repository
 public interface BalanceRepository extends JpaRepository<Balance, Long> {
     
-    /**
-     * Tìm balance theo wallet address và token type
+    /*
+     * ❌ REMOVED: Old entity relationship method
+     * Use WalletBalanceRepository with Junction Tables instead
      * 
-     * @param walletAddress wallet address
-     * @param tokenType token type (A, ram, rams, wram)
-     * @return Optional Balance
+     * Optional<Balance> findByWalletWalletAddressAndTokenType(String walletAddress, TokenType tokenType);
      */
-    Optional<Balance> findByWalletAddressAndTokenType(String walletAddress, Balance.TokenType tokenType);
     
-    /**
-     * Tìm tất cả balances của wallet
+    /*
+     * ❌ REMOVED: Old entity relationship method
+     * Use findByWalletId(Long walletId) instead
      * 
-     * @param walletAddress wallet address
-     * @return List of Balances
+     * List<Balance> findByWalletWalletAddress(String walletAddress);
      */
-    List<Balance> findByWalletAddress(String walletAddress);
     
     /**
      * Tìm balances theo token type
@@ -51,7 +49,7 @@ public interface BalanceRepository extends JpaRepository<Balance, Long> {
      * @param pageable pagination info
      * @return Page of Balances
      */
-    Page<Balance> findByTokenType(Balance.TokenType tokenType, Pageable pageable);
+    Page<Balance> findByTokenType(TokenType tokenType, Pageable pageable);
     
     /**
      * Tìm balances có giá trị > threshold
@@ -74,38 +72,51 @@ public interface BalanceRepository extends JpaRepository<Balance, Long> {
     
     /**
      * Custom query để get total portfolio value của user
+     * ✅ FIXED: Use native SQL for Junction Tables
      * 
      * @param userId user ID
      * @return total USD value
      */
-    @Query("SELECT COALESCE(SUM(b.usdValue), 0) FROM Balance b " +
-           "JOIN Wallet w ON b.walletAddress = w.walletAddress " +
-           "WHERE w.userId = :userId AND w.status = 'ACTIVE'")
+    @Query(value = "SELECT COALESCE(SUM(b.usd_value), 0) FROM balances b " +
+                   "INNER JOIN wallet_balances wb ON b.id = wb.balance_id " +
+                   "INNER JOIN wallets w ON wb.wallet_id = w.id " +
+                   "WHERE w.user_id = :userId AND w.status = 0 " +
+                   "AND wb.status = 0",
+           nativeQuery = true)
     BigDecimal getTotalPortfolioValue(@Param("userId") String userId);
     
     /**
      * Custom query để get portfolio breakdown theo token type
+     * ✅ FIXED: Use native SQL for Junction Tables
      * 
      * @param userId user ID
      * @return portfolio breakdown
      */
-    @Query("SELECT b.tokenType, SUM(b.balance), SUM(b.usdValue) FROM Balance b " +
-           "JOIN Wallet w ON b.walletAddress = w.walletAddress " +
-           "WHERE w.userId = :userId AND w.status = 'ACTIVE' AND b.balance > 0 " +
-           "GROUP BY b.tokenType")
+    @Query(value = "SELECT b.token_type, SUM(b.balance), SUM(b.usd_value) FROM balances b " +
+                   "INNER JOIN wallet_balances wb ON b.id = wb.balance_id " +
+                   "INNER JOIN wallets w ON wb.wallet_id = w.id " +
+                   "WHERE w.user_id = :userId AND w.status = 0 " +
+                   "AND wb.status = 0 AND b.balance > 0 " +
+                   "GROUP BY b.token_type",
+           nativeQuery = true)
     List<Object[]> getPortfolioBreakdown(@Param("userId") String userId);
     
     /**
      * Custom query để get top holders của token type
+     * ✅ FIXED: Use native SQL for Junction Tables
      * 
      * @param tokenType token type
      * @param limit number of top holders
      * @return top holders
      */
-    @Query("SELECT b.walletAddress, b.balance, b.usdValue FROM Balance b " +
-           "WHERE b.tokenType = :tokenType AND b.balance > 0 " +
-           "ORDER BY b.balance DESC")
-    List<Object[]> getTopHolders(@Param("tokenType") Balance.TokenType tokenType, Pageable pageable);
+    @Query(value = "SELECT w.wallet_address, b.balance, b.usd_value FROM balances b " +
+                   "INNER JOIN wallet_balances wb ON b.id = wb.balance_id " +
+                   "INNER JOIN wallets w ON wb.wallet_id = w.id " +
+                   "WHERE b.token_type = :tokenType AND b.balance > 0 " +
+                   "AND wb.status = 0 " +
+                   "ORDER BY b.balance DESC",
+           nativeQuery = true)
+    List<Object[]> getTopHolders(@Param("tokenType") TokenType tokenType, Pageable pageable);
     
     /**
      * Bulk update balances
@@ -120,9 +131,10 @@ public interface BalanceRepository extends JpaRepository<Balance, Long> {
     @Modifying
     @Query("UPDATE Balance b SET b.balance = :balance, b.usdValue = :usdValue, " +
            "b.lastUpdated = CURRENT_TIMESTAMP, b.version = b.version + 1 " +
-           "WHERE b.walletAddress = :walletAddress AND b.tokenType = :tokenType")
+           "WHERE b.walletId = (SELECT w.id FROM Wallet w WHERE w.walletAddress = :walletAddress) " +
+           "AND b.tokenType = :tokenType")
     int updateBalance(@Param("walletAddress") String walletAddress,
-                     @Param("tokenType") Balance.TokenType tokenType,
+                     @Param("tokenType") TokenType tokenType,
                      @Param("balance") BigDecimal balance,
                      @Param("usdValue") BigDecimal usdValue);
     
@@ -133,8 +145,8 @@ public interface BalanceRepository extends JpaRepository<Balance, Long> {
      * @param balances list of balance data
      */
     @Modifying
-    @Query(value = "INSERT INTO balances (wallet_address, token_type, balance, usd_value, last_updated, version) " +
-                   "VALUES (:#{#balance.walletAddress}, :#{#balance.tokenType}, :#{#balance.balance}, " +
+    @Query(value = "INSERT INTO balances (wallet_id, token_type, balance, usd_value, last_updated, version) " +
+                   "VALUES (:#{#balance.walletId}, :#{#balance.tokenType}, :#{#balance.balance}, " +
                    ":#{#balance.usdValue}, CURRENT_TIMESTAMP, 0) " +
                    "ON DUPLICATE KEY UPDATE " +
                    "balance = VALUES(balance), usd_value = VALUES(usd_value), " +
@@ -160,10 +172,19 @@ public interface BalanceRepository extends JpaRepository<Balance, Long> {
      * @param pageable pagination info
      * @return balances cần sync
      */
-    @Query("SELECT DISTINCT b.walletAddress FROM Balance b " +
-           "WHERE b.lastUpdated < :lastSyncThreshold")
+    @Query(value = "SELECT DISTINCT w.wallet_address FROM balances b " +
+                   "INNER JOIN wallets w ON b.wallet_id = w.id " +
+                   "WHERE b.last_updated < :lastSyncThreshold",
+           nativeQuery = true)
     Page<String> getWalletAddressesNeedingSync(@Param("lastSyncThreshold") LocalDateTime lastSyncThreshold, 
                                               Pageable pageable);
+    
+    /*
+     * ❌ REMOVED: Old entity relationship method
+     * Use findByWalletIdIn(List<Long> walletIds) instead
+     * 
+     * List<Balance> findByWalletWalletAddressIn(List<String> walletAddresses);
+     */
     
     /**
      * Get balance statistics cho monitoring
@@ -172,9 +193,31 @@ public interface BalanceRepository extends JpaRepository<Balance, Long> {
      */
     @Query("SELECT " +
            "COUNT(b) as totalBalances, " +
-           "COUNT(DISTINCT b.walletAddress) as uniqueWallets, " +
+           "COUNT(DISTINCT b.walletId) as uniqueWallets, " +
            "SUM(CASE WHEN b.balance > 0 THEN 1 ELSE 0 END) as nonZeroBalances, " +
-           "SUM(b.usdValue) as totalUsdValue " +
+           "SUM(COALESCE(b.usdValue, 0)) as totalUsdValue " +
            "FROM Balance b")
     Object getBalanceStatistics();
+    
+    // ✅ NEW METHODS: Added to support refactored entity structure
+    
+    /**
+     * Find balances by walletId (simple Long field)
+     */
+    List<Balance> findByWalletId(Long walletId);
+    
+    /**
+     * Find balances by multiple walletIds
+     */
+    List<Balance> findByWalletIdIn(List<Long> walletIds);
+    
+    /**
+     * Find balance by wallet ID and token type
+     * Used for balance sync operations
+     * 
+     * @param walletId wallet ID
+     * @param tokenType token type
+     * @return Optional Balance
+     */
+    Optional<Balance> findByWalletIdAndTokenType(Long walletId, TokenType tokenType);
 }

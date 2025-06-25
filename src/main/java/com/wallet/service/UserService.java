@@ -1,10 +1,12 @@
 package com.wallet.service;
 
 import com.wallet.entity.User;
+import com.wallet.entity.UserStatus;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 
 import java.time.LocalDateTime;
+import java.util.List;
 import java.util.Optional;
 
 /**
@@ -31,6 +33,20 @@ public interface UserService {
      * @throws RuntimeException nếu username/email đã tồn tại
      */
     User createUser(String username, String email, String password, String firstName, String lastName);
+    
+    /**
+     * Tạo user mới với specific userId (for auto-creation)
+     * 
+     * @param userId specific user ID to use
+     * @param username username
+     * @param email email
+     * @param password plain text password
+     * @param firstName first name
+     * @param lastName last name
+     * @return created User
+     * @throws RuntimeException nếu username/email hoặc userId đã tồn tại
+     */
+    User createUserWithId(String userId, String username, String email, String password, String firstName, String lastName);
     
     /**
      * Get user theo ID
@@ -77,7 +93,7 @@ public interface UserService {
      * @param status new status
      * @return updated User
      */
-    User updateUserStatus(String userId, User.UserStatus status);
+    User updateUserStatus(String userId, UserStatus status);
     
     /**
      * Verify user email
@@ -126,7 +142,7 @@ public interface UserService {
      * @param pageable pagination info
      * @return Page of Users
      */
-    Page<User> getUsersByStatus(User.UserStatus status, Pageable pageable);
+    Page<User> getUsersByStatus(UserStatus status, Pageable pageable);
     
     /**
      * Get active users với recent login
@@ -136,6 +152,13 @@ public interface UserService {
      * @return Page of active Users
      */
     Page<User> getActiveUsersWithRecentLogin(int days, Pageable pageable);
+    
+    /**
+     * Get all users (for debugging)
+     * 
+     * @return List of all Users
+     */
+    List<User> getAllUsers();
     
     /**
      * Get user statistics

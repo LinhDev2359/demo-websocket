@@ -40,6 +40,7 @@ public class BalanceSyncService {
     private final WalletBalanceRepository walletBalanceRepository;
     private final EOSCircuitBreakerService eosCircuitBreakerService;
     private final SimpMessagingTemplate messagingTemplate;
+    private final CryptoService cryptoService;
     
     // Executor cho parallel processing - sẽ được quản lý bởi Spring
     // private final Executor syncExecutor = Executors.newFixedThreadPool(10);
@@ -106,7 +107,7 @@ public class BalanceSyncService {
         
         // Tạo EOS API requests
         List<EOSBalanceRequest> requests = wallets.stream()
-                .map(wallet -> EOSBalanceRequest.forEOSToken(wallet.getWalletAddress()))
+                .map(wallet -> EOSBalanceRequest.forEOSToken(cryptoService.decryptWalletAddress(wallet.getWalletAddress())))
                 .toList();
         
         try {

@@ -7,6 +7,7 @@ import com.eoswallet.facade.WalletFacade;
 import com.wallet.service.WalletService;
 import com.wallet.service.UserService;
 import com.wallet.service.HyperionService;
+import com.wallet.service.CryptoService;
 import com.wallet.dto.TokenInfo;
 import com.wallet.dto.WalletTokensResponse;
 import lombok.extern.slf4j.Slf4j;
@@ -60,6 +61,9 @@ public class WalletFacadeV2Impl implements WalletFacade {
     
     @Autowired
     private HyperionService hyperionService;
+    
+    @Autowired
+    private CryptoService cryptoService;
 
     @Override
     public WalletCreateResponse createWallet(String userId, WalletCreateRequest request) {
@@ -100,7 +104,7 @@ public class WalletFacadeV2Impl implements WalletFacade {
         return WalletCreateResponse.builder()
                 .walletId(wallet.getId())
                 .name(wallet.getWalletName())
-                .eosAddress(wallet.getWalletAddress())
+                .eosAddress(cryptoService.decryptWalletAddress(wallet.getWalletAddress()))
                 .isPrimary(isPrimary)
                 .message("Wallet created successfully using Junction Tables")
                 .build();
@@ -184,7 +188,7 @@ public class WalletFacadeV2Impl implements WalletFacade {
         
         // ✅ Use V2 wallet service
         Wallet wallet = walletService.updateWalletName(userId, 
-                                                      existingWallet.getWalletAddress(), 
+                                                      cryptoService.decryptWalletAddress(existingWallet.getWalletAddress()), 
                                                       request.getName());
         return mapToWalletResponseV2(wallet, userId);
     }
@@ -206,7 +210,7 @@ public class WalletFacadeV2Impl implements WalletFacade {
         Wallet wallet = walletOpt.get();
         
         // ✅ Use V2 wallet service
-        walletService.deleteWallet(userId, wallet.getWalletAddress());
+        walletService.deleteWallet(userId, cryptoService.decryptWalletAddress(wallet.getWalletAddress()));
     }
 
     @Override
@@ -227,7 +231,7 @@ public class WalletFacadeV2Impl implements WalletFacade {
         
         // ✅ Use V2 wallet service
         Wallet wallet = walletService.setPrimaryWallet(userId, 
-                                                      existingWallet.getWalletAddress());
+                                                      cryptoService.decryptWalletAddress(existingWallet.getWalletAddress()));
         return mapToWalletResponseV2(wallet, userId);
     }
 
@@ -406,7 +410,7 @@ public class WalletFacadeV2Impl implements WalletFacade {
         return WalletResponse.builder()
                 .walletId(wallet.getId())
                 .name(wallet.getWalletName())
-                .eosAddress(wallet.getWalletAddress())
+                .eosAddress(cryptoService.decryptWalletAddress(wallet.getWalletAddress()))
                 .isPrimary(isPrimary) // ✅ From Junction Table, not entity
                 .isActive(wallet.getStatus() == WalletStatus.ACTIVE)
                 .createdAt(wallet.getCreatedAt())
@@ -438,12 +442,12 @@ public class WalletFacadeV2Impl implements WalletFacade {
                 userId, walletId, UserWallet.UserWalletStatus.ACTIVE);
             
             if (!hasAccess) {
-                return WalletTokensResponse.error(walletId, wallet.getWalletAddress(), 
+                return WalletTokensResponse.error(walletId, cryptoService.decryptWalletAddress(wallet.getWalletAddress()), 
                     "Access denied: Wallet does not belong to user");
             }
             
-            // ✅ STEP 4: Validate EOS address format
-            String walletAddress = wallet.getWalletAddress();
+            // ✅ STEP 4: Validate EOS address format (giải mã trước khi validate)
+            String walletAddress = cryptoService.decryptWalletAddress(wallet.getWalletAddress());
             if (!hyperionService.isValidEosAccount(walletAddress)) {
                 return WalletTokensResponse.error(walletId, walletAddress, 
                     "Invalid EOS address format: " + walletAddress);

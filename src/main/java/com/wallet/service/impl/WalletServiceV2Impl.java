@@ -4,6 +4,7 @@ import com.wallet.entity.*;
 import com.wallet.repository.*;
 import com.wallet.service.WalletService;
 import com.wallet.service.UserService;
+import com.wallet.service.CryptoService;
 import com.wallet.config.DatabaseShardingConfig;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -57,6 +58,9 @@ public class WalletServiceV2Impl implements WalletService {
     @Autowired(required = false)
     private DatabaseShardingConfig.DatabaseShardingUtils shardingUtils;
     
+    @Autowired
+    private CryptoService cryptoService;
+    
     // EOS address pattern for validation
     private static final Pattern EOS_ADDRESS_PATTERN = Pattern.compile("^[a-z1-5]{12}$");
     
@@ -80,7 +84,7 @@ public class WalletServiceV2Impl implements WalletService {
         // Validate input
         validateWalletInput(userId, walletAddress, walletName);
         
-        // Check if wallet address already exists
+        // Check if wallet address already exists (check with encrypted address)
         if (isWalletAddressExists(walletAddress)) {
             throw new RuntimeException("Wallet address already exists: " + walletAddress);
         }
@@ -107,7 +111,7 @@ public class WalletServiceV2Impl implements WalletService {
         // ✅ STEP 1: Create Wallet entity (NO User reference)
         Wallet wallet = new Wallet();
         wallet.setUserId(userId); // ✅ Simple String reference instead of @ManyToOne
-        wallet.setWalletAddress(walletAddress);
+        wallet.setWalletAddress(cryptoService.encryptWalletAddress(walletAddress)); // ✅ Mã hóa địa chỉ ví trước khi lưu
         wallet.setWalletName(walletName);
         wallet.setWalletType(WalletType.EOS);
         wallet.setStatus(WalletStatus.ACTIVE);
@@ -140,7 +144,17 @@ public class WalletServiceV2Impl implements WalletService {
     @Override
     @Transactional(readOnly = true)
     public Optional<Wallet> getWalletByAddress(String walletAddress) {
-        return walletRepository.findByWalletAddress(walletAddress);
+        // Mã hóa địa chỉ trước khi tìm kiếm
+        String encryptedAddress = cryptoService.encryptWalletAddress(walletAddress);
+        Optional<Wallet> walletOpt = walletRepository.findByWalletAddress(encryptedAddress);
+        
+        // Giải mã địa chỉ ví trước khi trả về
+        if (walletOpt.isPresent()) {
+            Wallet wallet = walletOpt.get();
+            wallet.setWalletAddress(cryptoService.decryptWalletAddress(wallet.getWalletAddress()));
+        }
+        
+        return walletOpt;
     }
     
     @Override
@@ -155,8 +169,11 @@ public class WalletServiceV2Impl implements WalletService {
             .map(UserWallet::getWalletId)
             .collect(Collectors.toList());
         
-        // Get actual wallets
+        // Get actual wallets và giải mã địa chỉ
         List<Wallet> wallets = walletRepository.findAllById(walletIds);
+        wallets.forEach(wallet -> {
+            wallet.setWalletAddress(cryptoService.decryptWalletAddress(wallet.getWalletAddress()));
+        });
         
         // Return as Page (manually constructed)
         return new org.springframework.data.domain.PageImpl<>(
@@ -170,7 +187,12 @@ public class WalletServiceV2Impl implements WalletService {
         List<Long> walletIds = userWalletRepository.findWalletIdsByUserId(
             userId, UserWallet.UserWalletStatus.ACTIVE);
         
-        return walletRepository.findAllById(walletIds);
+        List<Wallet> wallets = walletRepository.findAllById(walletIds);
+        // Giải mã địa chỉ ví trước khi trả về
+        wallets.forEach(wallet -> {
+            wallet.setWalletAddress(cryptoService.decryptWalletAddress(wallet.getWalletAddress()));
+        });
+        return wallets;
     }
     
     @Override
@@ -198,10 +220,16 @@ public class WalletServiceV2Impl implements WalletService {
         // Get actual wallet
         Optional<Wallet> primaryWallet = walletRepository.findById(primaryUserWallet.get().getWalletId());
         
-        // Cache the result if present (if Redis is available)
-        if (primaryWallet.isPresent() && redisTemplate != null) {
-            redisTemplate.opsForValue().set(cacheKey, primaryWallet.get(), CACHE_TTL);
-            log.debug("Cached primary wallet for user: {}", userId);
+        // Giải mã địa chỉ ví trước khi trả về
+        if (primaryWallet.isPresent()) {
+            Wallet wallet = primaryWallet.get();
+            wallet.setWalletAddress(cryptoService.decryptWalletAddress(wallet.getWalletAddress()));
+            
+            // Cache the result if present (if Redis is available)
+            if (redisTemplate != null) {
+                redisTemplate.opsForValue().set(cacheKey, wallet, CACHE_TTL);
+                log.debug("Cached primary wallet for user: {}", userId);
+            }
         }
         
         return primaryWallet;
@@ -359,8 +387,11 @@ public class WalletServiceV2Impl implements WalletService {
     @Override
     @Transactional(readOnly = true)
     public boolean isWalletAddressExists(String walletAddress) {
-        // Check cache first (if Redis is available)
-        String cacheKey = WALLET_EXISTS_CACHE_KEY + walletAddress;
+        // Mã hóa địa chỉ trước khi kiểm tra
+        String encryptedAddress = cryptoService.encryptWalletAddress(walletAddress);
+        
+        // Check cache first (if Redis is available) - use encrypted address for cache key
+        String cacheKey = WALLET_EXISTS_CACHE_KEY + encryptedAddress;
         if (redisTemplate != null) {
             Boolean cached = (Boolean) redisTemplate.opsForValue().get(cacheKey);
             
@@ -370,8 +401,8 @@ public class WalletServiceV2Impl implements WalletService {
             }
         }
         
-        // Query database
-        boolean exists = walletRepository.existsByWalletAddress(walletAddress);
+        // Query database with encrypted address
+        boolean exists = walletRepository.existsByWalletAddress(encryptedAddress);
         
         // Cache the result (if Redis is available)
         if (redisTemplate != null) {
@@ -403,7 +434,12 @@ public class WalletServiceV2Impl implements WalletService {
             .distinct()
             .collect(Collectors.toList());
         
-        return walletRepository.findAllById(walletIdsWithBalance);
+        List<Wallet> wallets = walletRepository.findAllById(walletIdsWithBalance);
+        // Giải mã địa chỉ ví trước khi trả về
+        wallets.forEach(wallet -> {
+            wallet.setWalletAddress(cryptoService.decryptWalletAddress(wallet.getWalletAddress()));
+        });
+        return wallets;
     }
     
     @Override
@@ -497,7 +533,9 @@ public class WalletServiceV2Impl implements WalletService {
     
     private void clearWalletExistenceCache(String walletAddress) {
         if (redisTemplate != null) {
-            String cacheKey = WALLET_EXISTS_CACHE_KEY + walletAddress;
+            // Sử dụng địa chỉ mã hóa cho cache key
+            String encryptedAddress = cryptoService.encryptWalletAddress(walletAddress);
+            String cacheKey = WALLET_EXISTS_CACHE_KEY + encryptedAddress;
             redisTemplate.delete(cacheKey);
             log.debug("Cleared wallet existence cache for address: {}", walletAddress);
         }

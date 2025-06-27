@@ -4,6 +4,7 @@ import com.wallet.dto.PortfolioResponse;
 import com.wallet.entity.*;
 import com.wallet.repository.*;
 import com.wallet.service.PortfolioService;
+import com.wallet.service.CryptoService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -64,6 +65,9 @@ public class PortfolioServiceV2Impl implements PortfolioService {
     
     @Autowired(required = false)
     private RedisTemplate<String, Object> redisTemplate;
+    
+    @Autowired
+    private CryptoService cryptoService;
     
     @Override
     public PortfolioResponse getUserPortfolio(String userId, boolean refreshCache) {
@@ -297,7 +301,7 @@ public class PortfolioServiceV2Impl implements PortfolioService {
         
         PortfolioResponse.WalletPortfolioInfo info = new PortfolioResponse.WalletPortfolioInfo(
             wallet.getId(),
-            wallet.getWalletAddress(),
+            cryptoService.decryptWalletAddress(wallet.getWalletAddress()), // ✅ Giải mã địa chỉ ví
             userWallet.getWalletType().name()
         );
         

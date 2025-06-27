@@ -4,6 +4,7 @@ import com.wallet.dto.PortfolioResponse;
 import com.wallet.dto.PortfolioListRequest;
 import com.wallet.dto.PortfolioListResponse;
 import com.wallet.service.PortfolioService;
+import com.wallet.service.CryptoService;
 import com.wallet.security.JwtTokenUtil;
 import com.wallet.repository.WalletRepository;
 import com.wallet.repository.WalletBalanceRepository;
@@ -48,6 +49,8 @@ public class PortfolioController {
     private final WalletRepository walletRepository;
     
     private final WalletBalanceRepository walletBalanceRepository;
+    
+    private final CryptoService cryptoService;
 
     /**
      * Get user portfolio via HTTP REST
@@ -191,7 +194,7 @@ public class PortfolioController {
         if (!userWallets.isEmpty()) {
             userWallets.forEach(wallet -> 
                 log.info("📝 Wallet: ID={}, Address={}, Type={}, Status={}", 
-                    wallet.getId(), wallet.getWalletAddress(), 
+                    wallet.getId(), cryptoService.decryptWalletAddress(wallet.getWalletAddress()), 
                     wallet.getWalletType(), wallet.getStatus()));
         }
         
@@ -209,7 +212,7 @@ public class PortfolioController {
                     wallet.getId(), WalletBalance.WalletBalanceStatus.ACTIVE);
                 
                 log.info("💰 Found {} balances for walletId: {} ({})", 
-                    walletBalances.size(), wallet.getId(), wallet.getWalletAddress());
+                    walletBalances.size(), wallet.getId(), cryptoService.decryptWalletAddress(wallet.getWalletAddress()));
                 
                 if (!walletBalances.isEmpty()) {
                     walletBalances.forEach(wb -> 
@@ -248,7 +251,7 @@ public class PortfolioController {
                 
                 return PortfolioListResponse.PortfolioItem.builder()
                     .walletId(wallet.getId()) // ✅ Real wallet ID
-                    .walletAddress(wallet.getWalletAddress()) // ✅ Real address
+                    .walletAddress(cryptoService.decryptWalletAddress(wallet.getWalletAddress())) // ✅ Giải mã địa chỉ ví
                     .walletName(wallet.getWalletName()) // ✅ Real name
                     .walletType(wallet.getWalletType().name()) // ✅ Real type
                     .isPrimary(wallet.getIsPrimary()) // ✅ Real primary flag
@@ -285,10 +288,10 @@ public class PortfolioController {
             .mapToInt(PortfolioListResponse.PortfolioItem::getTotalTokens)
             .sum();
             
-        // Find primary wallet address
+        // Find primary wallet address và giải mã
         String primaryWalletAddress = userWallets.stream()
             .filter(Wallet::getIsPrimary)
-            .map(Wallet::getWalletAddress)
+            .map(wallet -> cryptoService.decryptWalletAddress(wallet.getWalletAddress()))
             .findFirst()
             .orElse("");
         

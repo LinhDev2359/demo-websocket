@@ -15,8 +15,10 @@
       "Bash(ls:*)",
       "Bash(./mvnw clean:*)",
       "Bash(/mnt/c/jdk-17.0.12/bin/java.exe:*)",
-      "Bash(./test-compile.sh:*)"
+      "Bash(./test-compile.sh:*)",
+      "Bash(rg:*)"
     ],
     "deny": []
-  }
+  },
+  "enableAllProjectMcpServers": false
 }

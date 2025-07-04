@@ -1,18 +1,18 @@
 spring:
   profiles:
     active: ${ENVIRONMENT:dev}
+  aop:
+    proxy-target-class: true
   
-  # MySQL Database Configuration
+  # MySQL Database Configuration - Simplified single datasource
   datasource:
-    url: ${DATABASE_URL:jdbc:mysql://localhost:3306/wallet_system?useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true}
-    username: ${DATABASE_USERNAME:wallet_user}
-    password: ${DATABASE_PASSWORD:wallet_pass}
+    url: ${DATABASE_URL:jdbc:mysql://localhost:3306/wallet_system?useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true&autocommit=false}
+    username: ${DATABASE_USERNAME:root}
+    password: ${DATABASE_PASSWORD:linh2002}
     driver-class-name: com.mysql.cj.jdbc.Driver
-    
-    # HikariCP Configuration - Optimized for millions of users
     hikari:
-      maximum-pool-size: 50
-      minimum-idle: 10
+      maximum-pool-size: 20
+      minimum-idle: 5
       connection-timeout: 30000
       idle-timeout: 300000
       max-lifetime: 900000
@@ -23,13 +23,13 @@ spring:
   # JPA/Hibernate Configuration
   jpa:
     hibernate:
-      ddl-auto: validate
+      ddl-auto: update
       naming:
         physical-strategy: org.hibernate.boot.model.naming.PhysicalNamingStrategyStandardImpl
     show-sql: false
     properties:
       hibernate:
-        dialect: org.hibernate.dialect.MySQL8Dialect
+        dialect: org.hibernate.dialect.MySQLDialect  # Use the new non-deprecated dialect
         format_sql: true
         jdbc:
           batch_size: 50
@@ -40,10 +40,27 @@ spring:
           provider_disables_autocommit: true
         temp:
           use_jdbc_metadata_defaults: false
+  
+  # Flyway Database Migration Configuration
+  flyway:
+    enabled: false
+    baseline-on-migrate: true
+    validate-on-migrate: true
+    locations: classpath:db/migration
+    sql-migration-prefix: V
+    sql-migration-separator: __
+    sql-migration-suffixes: .sql
+    encoding: UTF-8
+    table: flyway_schema_history
+    clean-disabled: true
+    mixed: false
         
-  # Redis Configuration
+  # Redis Configuration - Temporarily disabled for debugging
+  autoconfigure:
+    exclude: org.springframework.boot.autoconfigure.data.redis.RedisAutoConfiguration
   data:
     redis:
+      enabled: false
       host: ${REDIS_HOST:localhost}
       port: ${REDIS_PORT:6379}
       password: ${REDIS_PASSWORD:}
@@ -55,14 +72,6 @@ spring:
           min-idle: 5
           max-wait: 3000ms
         shutdown-timeout: 100ms
-        
-  # Flyway Configuration - Disabled for initial development
-  flyway:
-    enabled: false
-    locations: classpath:db/migration
-    baseline-on-migrate: true
-    validate-on-migrate: true
-    clean-disabled: true
     
   # Security Configuration
   security:
@@ -78,8 +87,6 @@ spring:
 # Server Configuration
 server:
   port: ${SERVER_PORT:8080}
-  servlet:
-    context-path: /api
   tomcat:
     max-connections: 10000
     threads:
@@ -92,14 +99,35 @@ server:
 # EOS Blockchain Configuration
 eos:
   api:
+    # EOS Mainnet endpoints (production)
+    urls: "${EOS_API_URL_1:https://eos.greymass.com},${EOS_API_URL_2:https://api.eossweden.org},${EOS_API_URL_3:https://mainnet.eos.dfuse.io},${EOS_API_URL_4:https://api.eosn.io}"
     url: ${EOS_API_URL:https://eos.greymass.com}
+    
+    # EOS Testnet endpoints (for testing with testnet accounts like yalinktrg222)
+    testnet:
+      urls: "${EOS_TESTNET_URL_1:https://jungle4.greymass.com},${EOS_TESTNET_URL_2:https://jungle4.cryptolions.io},${EOS_TESTNET_URL_3:https://jungle4.api.eosnation.io}"
+      url: ${EOS_TESTNET_URL:https://jungle4.greymass.com}
+    
+    # Network selection: mainnet or testnet
+    network: ${EOS_NETWORK:testnet}
+    
     timeout: 30000
+    connection-timeout: 10000
+    read-timeout: 25000
     max-retries: 3
     retry-delay: 1000
+    failover-enabled: true
+
+# Hyperion API Configuration
+hyperion:
+  api:
+    url: ${HYPERION_API_URL:https://eos.hyperion.eosrio.io}
+    timeout: 15000
+    max-retries: 3
 
 # JWT Configuration
 jwt:
-  secret: ${JWT_SECRET:mySecretKey123456789012345678901234567890}
+  secret: ${JWT_SECRET:mySecretKey123456789012345678901234567890abcdefghijklmnopqrstuvwxyz}
   expiration: 86400 # 24 hours
   refresh-expiration: 604800 # 7 days
 
@@ -143,10 +171,7 @@ management:
   endpoint:
     health:
       show-details: when-authorized
-  metrics:
-    export:
-      prometheus:
-        enabled: true
+
 
 # Async Configuration
 async:
@@ -171,6 +196,37 @@ resilience4j:
         max-attempts: 3
         wait-duration: 1s
         exponential-backoff-multiplier: 2
+  timelimiter:
+    instances:
+      eosApi:
+        timeout-duration: 30s
+        cancel-running-future: true
+      eosApiHealth:
+        timeout-duration: 10s
+        cancel-running-future: true
+
+# Application-specific Configuration
+app:
+  repository:
+    # Read/Write Repository Separation
+    read-write-separation:
+      enabled: ${READ_WRITE_SEPARATION_ENABLED:false}
+      
+  # Database Sharding Configuration
+  sharding:
+    enabled: ${SHARDING_ENABLED:false}
+    shard-count: 16
+    
+  # Batch Processing Configuration
+  batch:
+    chunk-size: 1000
+    thread-pool-size: 10
+    
+  # Performance Monitoring
+  monitoring:
+    slow-query-threshold: 1000 # milliseconds
+    connection-pool-monitoring: true
+    cache-monitoring: true
 
 ---
 # Development Profile
@@ -179,15 +235,19 @@ spring:
     activate:
       on-profile: dev
   datasource:
-    url: jdbc:mysql://localhost:3307/wallet_system?useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true
+    url: jdbc:mysql://localhost:3306/wallet_system?useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true&autocommit=false
+    username: ${DATABASE_USERNAME:root}
+    password: ${DATABASE_PASSWORD:linh2002}
+    driver-class-name: com.mysql.cj.jdbc.Driver
   jpa:
     show-sql: true
     hibernate:
-      ddl-auto: create
+      ddl-auto: update
   data:
     redis:
       host: localhost
       port: 6379
+      password: # No password for development
   flyway:
     enabled: false
 
@@ -223,25 +283,3 @@ server:
     threads:
       max: 400
 
----
-# Test Profile
-spring:
-  config:
-    activate:
-      on-profile: test
-  datasource:
-    url: jdbc:h2:mem:testdb
-    driver-class-name: org.h2.Driver
-    username: sa
-    password: 
-  jpa:
-    hibernate:
-      ddl-auto: create-drop
-  data:
-    redis:
-      host: localhost
-      port: 6379
-
-logging:
-  level:
-    com.wallet: DEBUG

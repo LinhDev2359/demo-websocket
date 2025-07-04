@@ -1,0 +1,247 @@
+spring:
+  profiles:
+    active: ${ENVIRONMENT:dev}
+  
+  # MySQL Database Configuration
+  datasource:
+    url: ${DATABASE_URL:jdbc:mysql://localhost:3306/wallet_system?useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true}
+    username: ${DATABASE_USERNAME:wallet_user}
+    password: ${DATABASE_PASSWORD:wallet_pass}
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    
+    # HikariCP Configuration - Optimized for millions of users
+    hikari:
+      maximum-pool-size: 50
+      minimum-idle: 10
+      connection-timeout: 30000
+      idle-timeout: 300000
+      max-lifetime: 900000
+      leak-detection-threshold: 60000
+      pool-name: WalletHikariCP
+      auto-commit: false
+      
+  # JPA/Hibernate Configuration
+  jpa:
+    hibernate:
+      ddl-auto: validate
+      naming:
+        physical-strategy: org.hibernate.boot.model.naming.PhysicalNamingStrategyStandardImpl
+    show-sql: false
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.MySQL8Dialect
+        format_sql: true
+        jdbc:
+          batch_size: 50
+          batch_versioned_data: true
+        order_inserts: true
+        order_updates: true
+        connection:
+          provider_disables_autocommit: true
+        temp:
+          use_jdbc_metadata_defaults: false
+        
+  # Redis Configuration
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:}
+      timeout: 5000ms
+      lettuce:
+        pool:
+          max-active: 50
+          max-idle: 20
+          min-idle: 5
+          max-wait: 3000ms
+        shutdown-timeout: 100ms
+        
+  # Flyway Configuration - Disabled for initial development
+  flyway:
+    enabled: false
+    locations: classpath:db/migration
+    baseline-on-migrate: true
+    validate-on-migrate: true
+    clean-disabled: true
+    
+  # Security Configuration
+  security:
+    require-ssl: false
+    
+  # Jackson Configuration
+  jackson:
+    time-zone: UTC
+    date-format: yyyy-MM-dd HH:mm:ss
+    serialization:
+      write-dates-as-timestamps: false
+
+# Server Configuration
+server:
+  port: ${SERVER_PORT:8080}
+  servlet:
+    context-path: /api
+  tomcat:
+    max-connections: 10000
+    threads:
+      max: 200
+      min-spare: 10
+    connection-timeout: 20000
+    keep-alive-timeout: 60000
+    max-keep-alive-requests: 100
+
+# EOS Blockchain Configuration
+eos:
+  api:
+    url: ${EOS_API_URL:https://eos.greymass.com}
+    timeout: 30000
+    max-retries: 3
+    retry-delay: 1000
+
+# JWT Configuration
+jwt:
+  secret: ${JWT_SECRET:mySecretKey123456789012345678901234567890}
+  expiration: 86400 # 24 hours
+  refresh-expiration: 604800 # 7 days
+
+# Rate Limiting Configuration
+rate-limit:
+  requests-per-minute: 1000
+  requests-per-hour: 60000
+  enabled: true
+
+# Caching Configuration
+cache:
+  portfolio:
+    ttl: 300 # 5 minutes
+  balance:
+    ttl: 60 # 1 minute
+  wallet:
+    ttl: 3600 # 1 hour
+
+# Logging Configuration
+logging:
+  level:
+    com.wallet: INFO
+    org.hibernate.SQL: WARN
+    org.hibernate.type.descriptor.sql.BasicBinder: WARN
+    org.springframework.web.socket: INFO
+    org.springframework.security: INFO
+  pattern:
+    console: "%d{yyyy-MM-dd HH:mm:ss} - %msg%n"
+    file: "%d{yyyy-MM-dd HH:mm:ss} [%thread] %-5level %logger{36} - %msg%n"
+  file:
+    name: logs/wallet-system.log
+    max-size: 100MB
+    max-history: 30
+
+# Management Endpoints
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+  endpoint:
+    health:
+      show-details: when-authorized
+  metrics:
+    export:
+      prometheus:
+        enabled: true
+
+# Async Configuration
+async:
+  core-pool-size: 10
+  max-pool-size: 50
+  queue-capacity: 10000
+  thread-name-prefix: WalletAsync-
+
+# Circuit Breaker Configuration
+resilience4j:
+  circuitbreaker:
+    instances:
+      eosApi:
+        failure-rate-threshold: 50
+        wait-duration-in-open-state: 30s
+        permitted-number-of-calls-in-half-open-state: 5
+        sliding-window-size: 10
+        minimum-number-of-calls: 5
+  retry:
+    instances:
+      eosApi:
+        max-attempts: 3
+        wait-duration: 1s
+        exponential-backoff-multiplier: 2
+
+---
+# Development Profile
+spring:
+  config:
+    activate:
+      on-profile: dev
+  datasource:
+    url: jdbc:mysql://localhost:3307/wallet_system?useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true
+  jpa:
+    show-sql: true
+    hibernate:
+      ddl-auto: create
+  data:
+    redis:
+      host: localhost
+      port: 6379
+  flyway:
+    enabled: false
+
+logging:
+  level:
+    com.wallet: DEBUG
+    org.hibernate.SQL: DEBUG
+    org.hibernate.type.descriptor.sql.BasicBinder: TRACE
+
+---
+# Production Profile
+spring:
+  config:
+    activate:
+      on-profile: prod
+  datasource:
+    hikari:
+      maximum-pool-size: 100
+      minimum-idle: 20
+  jpa:
+    show-sql: false
+    hibernate:
+      ddl-auto: validate
+
+logging:
+  level:
+    com.wallet: INFO
+    org.hibernate.SQL: WARN
+
+server:
+  tomcat:
+    max-connections: 20000
+    threads:
+      max: 400
+
+---
+# Test Profile
+spring:
+  config:
+    activate:
+      on-profile: test
+  datasource:
+    url: jdbc:h2:mem:testdb
+    driver-class-name: org.h2.Driver
+    username: sa
+    password: 
+  jpa:
+    hibernate:
+      ddl-auto: create-drop
+  data:
+    redis:
+      host: localhost
+      port: 6379
+
+logging:
+  level:
+    com.wallet: DEBUG

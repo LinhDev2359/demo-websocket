@@ -1,0 +1,451 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WebSocket Portfolio Test</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/sockjs-client/1.5.2/sockjs.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/stomp.js/2.3.3/stomp.min.js"></script>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        .container { max-width: 1200px; margin: 0 auto; }
+        .section { margin: 20px 0; padding: 15px; border: 1px solid #ddd; border-radius: 5px; }
+        .controls { margin: 10px 0; }
+        .controls input, .controls button { margin: 5px; padding: 8px; }
+        .status { padding: 10px; margin: 10px 0; border-radius: 5px; }
+        .status.connected { background-color: #d4edda; color: #155724; }
+        .status.disconnected { background-color: #f8d7da; color: #721c24; }
+        .status.connecting { background-color: #fff3cd; color: #856404; }
+        .messages { height: 300px; overflow-y: auto; border: 1px solid #ccc; padding: 10px; background-color: #f9f9f9; }
+        .message { margin: 5px 0; padding: 5px; background-color: white; border-radius: 3px; }
+        .message.sent { background-color: #e3f2fd; }
+        .message.received { background-color: #f3e5f5; }
+        .message.error { background-color: #ffebee; color: #c62828; }
+        .portfolio-data { background-color: #f5f5f5; padding: 10px; border-radius: 5px; margin: 10px 0; }
+        button { background-color: #007bff; color: white; border: none; padding: 10px 15px; border-radius: 3px; cursor: pointer; }
+        button:hover { background-color: #0056b3; }
+        button:disabled { background-color: #6c757d; cursor: not-allowed; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>WebSocket Portfolio Test Interface</h1>
+        
+        <div class="section">
+            <h2>Kết nối WebSocket</h2>
+            <div class="controls">
+                <input type="text" id="serverUrl" placeholder="Server URL" value="http://localhost:8080/ws">
+                <textarea id="jwtToken" placeholder="JWT Token từ login API (không cần 'Bearer ' prefix)" rows="3" style="width: 500px;"></textarea>
+                <button onclick="testLogin()">Test Login API</button>
+                <button onclick="connect()">Connect (Simple)</button>
+                <button onclick="connectWithJWT()">Connect (JWT)</button>
+                <button onclick="disconnect()">Ngắt kết nối</button>
+            </div>
+            <div id="connectionStatus" class="status disconnected">Chưa kết nối</div>
+        </div>
+
+        <div class="section">
+            <h2>Login Test</h2>
+            <div class="controls">
+                <input type="text" id="loginUrl" placeholder="Login API URL" value="http://localhost:8080/api/auth/login">
+                <input type="email" id="email" placeholder="Email" value="truonggialinh2359@gmail.com">
+                <input type="password" id="password" placeholder="Password">
+                <button onclick="login()">Login & Get JWT</button>
+            </div>
+        </div>
+
+        <div class="section">
+            <h2>Portfolio Operations</h2>
+            <div class="controls">
+                <input type="text" id="userId" placeholder="User ID" value="user123">
+                <button onclick="subscribePortfolio()" id="subscribeBtn" disabled>Subscribe Portfolio</button>
+                <button onclick="getPortfolioList()" id="listBtn" disabled>Get Portfolio List</button>
+                <button onclick="refreshPortfolio()" id="refreshBtn" disabled>Refresh Portfolio</button>
+                <button onclick="unsubscribePortfolio()" id="unsubscribeBtn" disabled>Unsubscribe</button>
+            </div>
+            
+            <div class="controls">
+                <label>Include Balances: <input type="checkbox" id="includeBalances" checked></label>
+                <label>Page: <input type="number" id="page" value="0" min="0"></label>
+                <label>Size: <input type="number" id="size" value="10" min="1" max="100"></label>
+                <label>Refresh Cache: <input type="checkbox" id="refreshCache"></label>
+            </div>
+        </div>
+
+        <div class="section">
+            <h2>Messages</h2>
+            <button onclick="clearMessages()">Clear Messages</button>
+            <div id="messages" class="messages"></div>
+        </div>
+
+        <div class="section">
+            <h2>Portfolio Data</h2>
+            <div id="portfolioData" class="portfolio-data">
+                <p>Portfolio data sẽ hiển thị ở đây khi có updates...</p>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let stompClient = null;
+        let connected = false;
+        let currentUserId = null;
+
+        function connect() {
+            const serverUrl = document.getElementById('serverUrl').value;
+            
+            setConnectionStatus('connecting', 'Đang kết nối...');
+            addMessage('Đang kết nối đến: ' + serverUrl, 'sent');
+            addMessage('Testing simple connection without JWT...', 'sent');
+
+            const socket = new SockJS(serverUrl);
+            stompClient = Stomp.over(socket);
+            
+            // Enable debug logging
+            stompClient.debug = function(str) {
+                addMessage('STOMP Debug: ' + str, 'received');
+            };
+            
+            // Simple headers without JWT for testing
+            const headers = {};
+
+            stompClient.connect(headers, onConnected, onError);
+        }
+
+        function connectWithJWT() {
+            const serverUrl = document.getElementById('serverUrl').value;
+            const jwtToken = document.getElementById('jwtToken').value.trim();
+            
+            if (!jwtToken) {
+                addMessage('Vui lòng nhập JWT token hoặc login trước', 'error');
+                return;
+            }
+
+            setConnectionStatus('connecting', 'Đang kết nối...');
+            addMessage('Đang kết nối đến: ' + serverUrl, 'sent');
+            addMessage('Sử dụng JWT token: ' + jwtToken.substring(0, 20) + '...', 'sent');
+
+            // Add JWT token to URL as query parameter
+            const socketUrl = serverUrl + '?token=' + encodeURIComponent(jwtToken);
+            const socket = new SockJS(socketUrl);
+            stompClient = Stomp.over(socket);
+            
+            // Enable debug logging
+            stompClient.debug = function(str) {
+                addMessage('STOMP Debug: ' + str, 'received');
+            };
+            
+            // Headers với JWT token (both methods)
+            const headers = {
+                'Authorization': 'Bearer ' + jwtToken,
+                'token': jwtToken
+            };
+
+            stompClient.connect(headers, onConnected, onError);
+        }
+
+        async function login() {
+            const loginUrl = document.getElementById('loginUrl').value;
+            const email = document.getElementById('email').value;
+            const password = document.getElementById('password').value;
+            
+            if (!email || !password) {
+                addMessage('Vui lòng nhập email và password', 'error');
+                return;
+            }
+
+            try {
+                addMessage('Đang login...', 'sent');
+                
+                const response = await fetch(loginUrl, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        username: email,
+                        password: password
+                    })
+                });
+
+                if (response.ok) {
+                    const data = await response.json();
+                    addMessage('Login thành công!', 'received');
+                    
+                    if (data.token || data.accessToken) {
+                        const token = data.token || data.accessToken;
+                        document.getElementById('jwtToken').value = token;
+                        addMessage('JWT token đã được lưu tự động', 'received');
+                        
+                        // Auto-fill user ID if available
+                        if (data.userId) {
+                            document.getElementById('userId').value = data.userId;
+                            addMessage('User ID: ' + data.userId, 'received');
+                        }
+                    } else {
+                        addMessage('Không tìm thấy token trong response: ' + JSON.stringify(data), 'error');
+                    }
+                } else {
+                    const errorData = await response.text();
+                    addMessage('Login thất bại: ' + response.status + ' - ' + errorData, 'error');
+                }
+            } catch (error) {
+                addMessage('Lỗi khi login: ' + error.message, 'error');
+            }
+        }
+
+        function testLogin() {
+            const loginUrl = document.getElementById('loginUrl').value;
+            addMessage('Testing login endpoint: ' + loginUrl, 'sent');
+            
+            fetch(loginUrl, {
+                method: 'OPTIONS'
+            })
+            .then(response => {
+                addMessage('Login endpoint accessible - Status: ' + response.status, 'received');
+            })
+            .catch(error => {
+                addMessage('Không thể kết nối đến login endpoint: ' + error.message, 'error');
+            });
+        }
+
+        function onConnected(frame) {
+            connected = true;
+            setConnectionStatus('connected', 'Đã kết nối thành công');
+            addMessage('✅ Kết nối WebSocket thành công!', 'received');
+            console.log('Connected: ' + frame);
+            
+            // Enable buttons
+            document.getElementById('subscribeBtn').disabled = false;
+            document.getElementById('listBtn').disabled = false;
+            document.getElementById('refreshBtn').disabled = false;
+            document.getElementById('unsubscribeBtn').disabled = false;
+
+            // Test basic functionality first
+            testBasicConnection();
+            
+            // Subscribe to test topics
+            stompClient.subscribe('/topic/echo', function (message) {
+                addMessage('Echo received: ' + message.body, 'received');
+            });
+            
+            stompClient.subscribe('/topic/ping', function (message) {
+                addMessage('Ping response: ' + message.body, 'received');
+            });
+            
+            stompClient.subscribe('/topic/hello', function (message) {
+                addMessage('Hello response: ' + message.body, 'received');
+            });
+
+            // Subscribe to user-specific queues
+            currentUserId = document.getElementById('userId').value;
+            
+            // Subscribe to portfolio updates
+            stompClient.subscribe('/user/queue/portfolio', function (message) {
+                addMessage('Portfolio Update nhận được', 'received');
+                const portfolioData = JSON.parse(message.body);
+                displayPortfolioData(portfolioData);
+            });
+
+            // Subscribe to portfolio list
+            stompClient.subscribe('/user/queue/portfolio-list', function (message) {
+                addMessage('Portfolio List nhận được', 'received');
+                const portfolioList = JSON.parse(message.body);
+                displayPortfolioList(portfolioList);
+            });
+
+            // Subscribe to errors
+            stompClient.subscribe('/user/queue/errors', function (message) {
+                addMessage('Error nhận được: ' + message.body, 'error');
+                console.error('WebSocket Error:', message.body);
+            });
+        }
+        
+        function testBasicConnection() {
+            if (!connected) return;
+            
+            addMessage('Testing basic WebSocket functionality...', 'sent');
+            
+            // Test ping
+            setTimeout(() => {
+                if (connected) {
+                    stompClient.send('/app/test/ping', {}, '');
+                    addMessage('Sent ping test', 'sent');
+                }
+            }, 1000);
+            
+            // Test echo
+            setTimeout(() => {
+                if (connected) {
+                    stompClient.send('/app/test/echo', {}, 'Hello from client');
+                    addMessage('Sent echo test', 'sent');
+                }
+            }, 2000);
+            
+            // Test hello
+            setTimeout(() => {
+                if (connected) {
+                    stompClient.send('/app/test/hello', {}, 'WebSocket Client');
+                    addMessage('Sent hello test', 'sent');
+                }
+            }, 3000);
+        }
+
+        function onError(error) {
+            connected = false;
+            setConnectionStatus('disconnected', 'Lỗi kết nối: ' + error);
+            addMessage('Lỗi kết nối: ' + error, 'error');
+            console.error('WebSocket Error:', error);
+            
+            // Disable buttons
+            document.getElementById('subscribeBtn').disabled = true;
+            document.getElementById('listBtn').disabled = true;
+            document.getElementById('refreshBtn').disabled = true;
+            document.getElementById('unsubscribeBtn').disabled = true;
+        }
+
+        function disconnect() {
+            if (stompClient !== null) {
+                stompClient.disconnect();
+            }
+            connected = false;
+            setConnectionStatus('disconnected', 'Đã ngắt kết nối');
+            addMessage('Đã ngắt kết nối WebSocket', 'sent');
+            
+            // Disable buttons
+            document.getElementById('subscribeBtn').disabled = true;
+            document.getElementById('listBtn').disabled = true;
+            document.getElementById('refreshBtn').disabled = true;
+            document.getElementById('unsubscribeBtn').disabled = true;
+        }
+
+        function subscribePortfolio() {
+            if (!connected) return;
+            
+            const userId = document.getElementById('userId').value;
+            addMessage('Subscribing to portfolio for user: ' + userId, 'sent');
+            
+            // Send subscription request
+            stompClient.send('/app/portfolio/subscribe/' + userId, {}, '');
+        }
+
+        function getPortfolioList() {
+            if (!connected) return;
+            
+            const userId = document.getElementById('userId').value;
+            const includeBalances = document.getElementById('includeBalances').checked;
+            const page = parseInt(document.getElementById('page').value);
+            const size = parseInt(document.getElementById('size').value);
+            
+            const request = {
+                userId: userId,
+                includeBalances: includeBalances,
+                page: page,
+                size: size
+            };
+            
+            addMessage('Getting portfolio list: ' + JSON.stringify(request), 'sent');
+            stompClient.send('/app/portfolio/list', {}, JSON.stringify(request));
+        }
+
+        function refreshPortfolio() {
+            if (!connected) return;
+            
+            const userId = document.getElementById('userId').value;
+            const refreshCache = document.getElementById('refreshCache').checked;
+            
+            const request = {
+                userId: userId,
+                refreshCache: refreshCache
+            };
+            
+            addMessage('Requesting portfolio update: ' + JSON.stringify(request), 'sent');
+            stompClient.send('/app/portfolio/update', {}, JSON.stringify(request));
+        }
+
+        function unsubscribePortfolio() {
+            if (!connected) return;
+            
+            const userId = document.getElementById('userId').value;
+            addMessage('Unsubscribing from portfolio for user: ' + userId, 'sent');
+            
+            stompClient.send('/app/portfolio/unsubscribe/' + userId, {}, '');
+        }
+
+        function setConnectionStatus(status, message) {
+            const statusElement = document.getElementById('connectionStatus');
+            statusElement.className = 'status ' + status;
+            statusElement.textContent = message;
+        }
+
+        function addMessage(message, type = 'received') {
+            const messagesDiv = document.getElementById('messages');
+            const messageElement = document.createElement('div');
+            messageElement.className = 'message ' + type;
+            messageElement.innerHTML = '<strong>' + new Date().toLocaleTimeString() + ':</strong> ' + message;
+            messagesDiv.appendChild(messageElement);
+            messagesDiv.scrollTop = messagesDiv.scrollHeight;
+        }
+
+        function clearMessages() {
+            document.getElementById('messages').innerHTML = '';
+        }
+
+        function displayPortfolioData(data) {
+            const portfolioDiv = document.getElementById('portfolioData');
+            portfolioDiv.innerHTML = '<h3>Portfolio Update</h3><pre>' + JSON.stringify(data, null, 2) + '</pre>';
+        }
+
+        function displayPortfolioList(data) {
+            const portfolioDiv = document.getElementById('portfolioData');
+            
+            let html = '<h3>Portfolio List</h3>';
+            
+            if (data.summary) {
+                html += '<h4>Summary</h4>';
+                html += '<p>Total Wallets: ' + data.summary.totalWallets + '</p>';
+                html += '<p>Active Wallets: ' + data.summary.activeWallets + '</p>';
+                html += '<p>Total Balance USD: $' + (data.summary.totalBalanceUsd || 0) + '</p>';
+                html += '<p>Total Tokens: ' + data.summary.totalTokens + '</p>';
+            }
+            
+            if (data.portfolios && data.portfolios.length > 0) {
+                html += '<h4>Wallets</h4>';
+                data.portfolios.forEach(wallet => {
+                    html += '<div style="border: 1px solid #ddd; margin: 10px 0; padding: 10px; border-radius: 5px;">';
+                    html += '<p><strong>Wallet:</strong> ' + wallet.walletName + ' (' + wallet.walletAddress + ')</p>';
+                    html += '<p><strong>Type:</strong> ' + wallet.walletType + ' | <strong>Status:</strong> ' + wallet.status + '</p>';
+                    html += '<p><strong>Total USD:</strong> $' + (wallet.totalBalanceUsd || 0) + ' | <strong>Tokens:</strong> ' + wallet.totalTokens + '</p>';
+                    
+                    if (wallet.balances && wallet.balances.length > 0) {
+                        html += '<h5>Balances:</h5>';
+                        wallet.balances.forEach(balance => {
+                            html += '<div style="margin-left: 20px; padding: 5px; background-color: #f0f0f0; margin: 5px 0;">';
+                            html += '<p><strong>' + balance.tokenSymbol + ':</strong> ' + balance.balance + ' ($' + (balance.usdValue || 0) + ')</p>';
+                            html += '</div>';
+                        });
+                    }
+                    
+                    html += '</div>';
+                });
+            }
+            
+            if (data.pagination) {
+                html += '<h4>Pagination</h4>';
+                html += '<p>Page ' + (data.pagination.currentPage + 1) + ' of ' + data.pagination.totalPages + '</p>';
+                html += '<p>Total Elements: ' + data.pagination.totalElements + '</p>';
+            }
+            
+            portfolioDiv.innerHTML = html;
+        }
+
+        // Auto-fill user ID on page load
+        window.onload = function() {
+            const userIdInput = document.getElementById('userId');
+            if (!userIdInput.value) {
+                userIdInput.value = 'user123';
+            }
+        };
+    </script>
+</body>
+</html>

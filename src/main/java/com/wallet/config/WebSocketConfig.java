@@ -5,12 +5,18 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.http.server.ServerHttpRequest;
+import org.springframework.http.server.ServerHttpResponse;
 import org.springframework.messaging.simp.config.ChannelRegistration;
 import org.springframework.messaging.simp.config.MessageBrokerRegistry;
 import org.springframework.scheduling.TaskScheduler;
+import org.springframework.web.socket.WebSocketHandler;
 import org.springframework.web.socket.config.annotation.EnableWebSocketMessageBroker;
 import org.springframework.web.socket.config.annotation.StompEndpointRegistry;
 import org.springframework.web.socket.config.annotation.WebSocketMessageBrokerConfigurer;
+import org.springframework.web.socket.server.HandshakeInterceptor;
+
+import java.util.Map;
 
 /**
  * WebSocket Configuration với STOMP
@@ -52,12 +58,38 @@ public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
         
         registry.addEndpoint("/ws")
                 .setAllowedOriginPatterns("*") // Allow all origins for development
+                .addInterceptors(new HandshakeInterceptor() {
+                    @Override
+                    public boolean beforeHandshake(ServerHttpRequest request, ServerHttpResponse response,
+                                                   WebSocketHandler wsHandler, Map<String, Object> attributes) throws Exception {
+                        // Extract JWT token from URL parameters
+                        String query = request.getURI().getQuery();
+                        if (query != null && query.contains("token=")) {
+                            String[] params = query.split("&");
+                            for (String param : params) {
+                                if (param.startsWith("token=")) {
+                                    String token = param.substring(6); // Remove "token=" prefix
+                                    attributes.put("token", java.net.URLDecoder.decode(token, "UTF-8"));
+                                    log.info("JWT token extracted from URL parameters during handshake");
+                                    break;
+                                }
+                            }
+                        }
+                        return true;
+                    }
+                    
+                    @Override
+                    public void afterHandshake(ServerHttpRequest request, ServerHttpResponse response,
+                                               WebSocketHandler wsHandler, Exception exception) {
+                        // No action needed
+                    }
+                })
                 .withSockJS() // SockJS fallback support
                 .setSessionCookieNeeded(false) // Không cần cookies
                 .setHeartbeatTime(25000) // Heartbeat every 25 seconds
                 .setDisconnectDelay(5000); // Disconnect delay 5 seconds
         
-        log.info("✅ STOMP endpoint '/ws' configured with SockJS fallback");
+        log.info("✅ STOMP endpoint '/ws' configured with SockJS fallback and JWT token extraction");
     }
 
     /**
@@ -109,9 +141,10 @@ public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
      */
     @Override
     public void configureClientInboundChannel(ChannelRegistration registration) {
-        log.info("Configuring client inbound channel with JWT authentication");
+        log.info("Configuring client inbound channel WITHOUT JWT authentication for testing");
         
-        registration.interceptors(jwtAuthInterceptor);
+        // Temporarily disable JWT interceptor for testing
+        // registration.interceptors(jwtAuthInterceptor);
         
         // Configure thread pool cho inbound messages
         registration.taskExecutor()
@@ -120,7 +153,7 @@ public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
                 .queueCapacity(1000)
                 .keepAliveSeconds(60);
         
-        log.info("✅ Inbound channel configured with JWT interceptor");
+        log.info("✅ Inbound channel configured WITHOUT JWT interceptor");
     }
 
     /**

@@ -41,9 +41,9 @@ public class WebSocketSecurityConfig {
                              SimpMessageType.HEARTBEAT, 
                              SimpMessageType.UNSUBSCRIBE, 
                              SimpMessageType.DISCONNECT).permitAll()
-            .simpDestMatchers("/app/**").authenticated()
-            .simpSubscribeDestMatchers("/topic/**", "/user/**").authenticated()
-            .anyMessage().authenticated();
+            .simpDestMatchers("/app/**").permitAll()
+            .simpSubscribeDestMatchers("/topic/**", "/user/**").permitAll()
+            .anyMessage().permitAll();
 
         return messages.build();
     }

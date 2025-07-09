@@ -127,7 +127,7 @@ hyperion:
 
 # JWT Configuration
 jwt:
-  secret: ${JWT_SECRET:mySecretKey123456789012345678901234567890abcdefghijklmnopqrstuvwxyz}
+  secret: ${JWT_SECRET:mySecretKey123456789012345678901234567890abcdefghijklmnopqrstuvwxyz_secure_wallet_system_2024_minimum_64_bytes_for_HS512_algorithm}
   expiration: 86400 # 24 hours
   refresh-expiration: 604800 # 7 days
 

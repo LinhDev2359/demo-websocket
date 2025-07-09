@@ -71,6 +71,12 @@ public class CustomUserDetailsService implements UserDetailsService {
         log.info("Found user - ID: {}, Username: {}, Email: {}, Status: {}, EmailVerified: {}", 
                 user.getUserId(), user.getUsername(), user.getEmail(), user.getStatus(), user.getEmailVerified());
         
+        // Debug: Log password hash info
+        String passwordHash = user.getPasswordHash();
+        log.info("Password hash info - Length: {}, Starts with: {}", 
+                passwordHash != null ? passwordHash.length() : 0, 
+                passwordHash != null ? passwordHash.substring(0, Math.min(10, passwordHash.length())) : "null");
+        
         return createUserPrincipal(user);
     }
 

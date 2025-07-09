@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>WebSocket Portfolio Test</title>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/sockjs-client/1.5.2/sockjs.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/sockjs-client/1.6.1/sockjs.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/stomp.js/2.3.3/stomp.min.js"></script>
     <style>
         body { font-family: Arial, sans-serif; margin: 20px; }
@@ -37,8 +37,14 @@
                 <input type="text" id="serverUrl" placeholder="Server URL" value="http://localhost:8080/ws">
                 <textarea id="jwtToken" placeholder="JWT Token từ login API (không cần 'Bearer ' prefix)" rows="3" style="width: 500px;"></textarea>
                 <button onclick="testLogin()">Test Login API</button>
-                <button onclick="connect()">Connect (Simple)</button>
-                <button onclick="connectWithJWT()">Connect (JWT)</button>
+                <button onclick="testServer()">Test Server</button>
+                <button onclick="connect()">Connect (JWT Required)</button>
+                <button onclick="connectWithJWT()">Connect (JWT Full)</button>
+                <button onclick="connectNative()">Connect Native (JWT)</button>
+                <button onclick="testBasicStomp()">Test Basic STOMP (JWT)</button>
+                <button onclick="connectSimple()">Connect Simple (Fixed)</button>
+                <button onclick="connectDirect()">Connect Direct (Debug)</button>
+                <button onclick="connectPureWebSocket()">Connect Pure WebSocket (No STOMP)</button>
                 <button onclick="disconnect()">Ngắt kết nối</button>
             </div>
             <div id="connectionStatus" class="status disconnected">Chưa kết nối</div>
@@ -48,9 +54,16 @@
             <h2>Login Test</h2>
             <div class="controls">
                 <input type="text" id="loginUrl" placeholder="Login API URL" value="http://localhost:8080/api/auth/login">
-                <input type="email" id="email" placeholder="Email" value="truonggialinh2359@gmail.com">
+                <input type="username" id="username" placeholder="Username" value="truonggialinh2359@gmail.com">
                 <input type="password" id="password" placeholder="Password">
                 <button onclick="login()">Login & Get JWT</button>
+                <button onclick="debugUser()">Debug User</button>
+                <button onclick="testPassword()">Test Password</button>
+                <button onclick="refreshJwtToken()">Refresh JWT Token</button>
+            </div>
+            <div class="controls">
+                <label>Try default password: <input type="text" id="defaultPassword" placeholder="Default password" value="password123"></label>
+                <button onclick="tryDefaultPassword()">Try Default</button>
             </div>
         </div>
 
@@ -90,26 +103,112 @@
         let stompClient = null;
         let connected = false;
         let currentUserId = null;
+        let heartbeatInterval = null;
 
         function connect() {
             const serverUrl = document.getElementById('serverUrl').value;
+            const userId = document.getElementById('userId').value || 'user123';
+            const jwtToken = document.getElementById('jwtToken').value.trim();
+            
+            if (!jwtToken) {
+                addMessage('❌ JWT token is required for connection. Please login first or enter a token.', 'error');
+                return;
+            }
             
             setConnectionStatus('connecting', 'Đang kết nối...');
             addMessage('Đang kết nối đến: ' + serverUrl, 'sent');
-            addMessage('Testing simple connection without JWT...', 'sent');
+            addMessage('Using JWT token for authentication', 'sent');
 
-            const socket = new SockJS(serverUrl);
-            stompClient = Stomp.over(socket);
+            // Add JWT token to URL as query parameter
+            const socketUrl = serverUrl + '?token=' + encodeURIComponent(jwtToken);
+            const socket = new SockJS(socketUrl);
             
-            // Enable debug logging
-            stompClient.debug = function(str) {
-                addMessage('STOMP Debug: ' + str, 'received');
+            // Add socket event handlers
+            socket.onopen = function() {
+                addMessage('✅ SockJS connection opened', 'received');
+                // Add a small delay to ensure connection is ready
+                setTimeout(() => {
+                    addMessage('SockJS connection ready for STOMP', 'received');
+                }, 100);
             };
             
-            // Simple headers without JWT for testing
-            const headers = {};
+            socket.onclose = function(event) {
+                addMessage('❌ SockJS connection closed: ' + event.code + ' - ' + event.reason, 'error');
+                connected = false;
+                stopHeartbeat();
+                setConnectionStatus('disconnected', 'SockJS connection closed');
+            };
+            
+            socket.onerror = function(error) {
+                addMessage('❌ SockJS error: ' + JSON.stringify(error), 'error');
+            };
+            
+            stompClient = Stomp.over(socket);
+            
+            // Enable debug logging to see what's happening
+            stompClient.debug = function(str) {
+                console.log('STOMP DEBUG: ' + str);
+                addMessage('STOMP: ' + str, 'received');
+            };
+            
+            // Add error handler for connection issues
+            stompClient.onStompError = function (frame) {
+                console.error('STOMP Error Frame:', frame);
+                addMessage('❌ STOMP Error: ' + frame.headers['message'], 'error');
+                addMessage('Error Details: ' + frame.body, 'error');
+                setConnectionStatus('disconnected', 'STOMP Error: ' + frame.headers['message']);
+            };
+            
+            // Add receipt handler
+            stompClient.onReceipt = function (frame) {
+                console.log('STOMP Receipt:', frame);
+                addMessage('✅ STOMP Receipt: ' + frame.headers['receipt-id'], 'received');
+            };
+            
+            // Headers with JWT token
+            const headers = {
+                'Authorization': 'Bearer ' + jwtToken,
+                'token': jwtToken,
+                'accept-version': '1.0,1.1,1.2',
+                'heart-beat': '0,0'
+            };
 
-            stompClient.connect(headers, onConnected, onError);
+            // Wait for SockJS to be fully ready before starting STOMP
+            socket.onopen = function() {
+                addMessage('✅ SockJS connection opened', 'received');
+                
+                setTimeout(() => {
+                    addMessage('🔄 Starting STOMP connection...', 'sent');
+                    
+                    // Add connection timeout
+                    const connectTimeout = setTimeout(() => {
+                        if (!connected) {
+                            addMessage('❌ Connection timeout - taking too long to connect', 'error');
+                            setConnectionStatus('disconnected', 'Connection timeout');
+                            if (stompClient) {
+                                stompClient.disconnect();
+                            }
+                        }
+                    }, 30000); // 30 second timeout
+
+                    try {
+                        stompClient.connect(headers, (frame) => {
+                            clearTimeout(connectTimeout);
+                            addMessage('✅ STOMP connected successfully!', 'received');
+                            onConnected(frame);
+                        }, (error) => {
+                            clearTimeout(connectTimeout);
+                            addMessage('❌ STOMP connection failed: ' + error, 'error');
+                            onError(error);
+                        });
+                    } catch (error) {
+                        clearTimeout(connectTimeout);
+                        addMessage('❌ Error during STOMP connect: ' + error.message, 'error');
+                        console.error('STOMP connect error:', error);
+                        onError(error);
+                    }
+                }, 1000); // 1 second delay to ensure SockJS is fully ready
+            };
         }
 
         function connectWithJWT() {
@@ -128,29 +227,263 @@
             // Add JWT token to URL as query parameter
             const socketUrl = serverUrl + '?token=' + encodeURIComponent(jwtToken);
             const socket = new SockJS(socketUrl);
+            
+            // Add socket event handlers
+            socket.onopen = function() {
+                addMessage('✅ SockJS connection opened', 'received');
+                // Add a small delay to ensure connection is ready
+                setTimeout(() => {
+                    addMessage('SockJS connection ready for STOMP', 'received');
+                }, 100);
+            };
+            
+            socket.onclose = function(event) {
+                addMessage('❌ SockJS connection closed: ' + event.code + ' - ' + event.reason, 'error');
+                connected = false;
+                stopHeartbeat();
+                setConnectionStatus('disconnected', 'SockJS connection closed');
+            };
+            
+            socket.onerror = function(error) {
+                addMessage('❌ SockJS error: ' + JSON.stringify(error), 'error');
+            };
+            
             stompClient = Stomp.over(socket);
             
-            // Enable debug logging
+            // Enable debug logging to see what's happening
             stompClient.debug = function(str) {
-                addMessage('STOMP Debug: ' + str, 'received');
+                console.log('STOMP DEBUG: ' + str);
+                addMessage('STOMP: ' + str, 'received');
+            };
+            
+            // Add error handler for connection issues
+            stompClient.onStompError = function (frame) {
+                console.error('STOMP Error Frame:', frame);
+                addMessage('❌ STOMP Error: ' + frame.headers['message'], 'error');
+                addMessage('Error Details: ' + frame.body, 'error');
+                setConnectionStatus('disconnected', 'STOMP Error: ' + frame.headers['message']);
+            };
+            
+            // Add receipt handler
+            stompClient.onReceipt = function (frame) {
+                console.log('STOMP Receipt:', frame);
+                addMessage('✅ STOMP Receipt: ' + frame.headers['receipt-id'], 'received');
             };
             
             // Headers với JWT token (both methods)
             const headers = {
                 'Authorization': 'Bearer ' + jwtToken,
-                'token': jwtToken
+                'token': jwtToken,
+                'accept-version': '1.0,1.1,1.2',
+                'heart-beat': '0,0'
             };
 
-            stompClient.connect(headers, onConnected, onError);
+            // Add connection timeout
+            const connectTimeout = setTimeout(() => {
+                if (!connected) {
+                    addMessage('❌ Connection timeout - taking too long to connect', 'error');
+                    setConnectionStatus('disconnected', 'Connection timeout');
+                    if (stompClient) {
+                        stompClient.disconnect();
+                    }
+                }
+            }, 30000); // 30 second timeout
+
+            // Add delay to ensure SockJS connection is fully ready
+            setTimeout(() => {
+                try {
+                    addMessage('🔄 Initiating STOMP connection...', 'sent');
+                    stompClient.connect(headers, (frame) => {
+                        clearTimeout(connectTimeout);
+                        addMessage('✅ STOMP connected via JWT!', 'received');
+                        onConnected(frame);
+                    }, (error) => {
+                        clearTimeout(connectTimeout);
+                        addMessage('❌ STOMP JWT connection failed: ' + error, 'error');
+                        onError(error);
+                    });
+                } catch (error) {
+                    clearTimeout(connectTimeout);
+                    addMessage('❌ Error during STOMP connect: ' + error.message, 'error');
+                    console.error('STOMP connect error:', error);
+                    onError(error);
+                }
+            }, 1000); // 1 second delay to ensure SockJS is ready
+        }
+
+        function connectNative() {
+            const serverUrl = document.getElementById('serverUrl').value;
+            const userId = document.getElementById('userId').value || 'user123';
+            const jwtToken = document.getElementById('jwtToken').value.trim();
+            
+            if (!jwtToken) {
+                addMessage('❌ JWT token is required for native WebSocket connection. Please login first.', 'error');
+                return;
+            }
+            
+            // Convert HTTP URL to WebSocket URL
+            let wsUrl = serverUrl.replace('http://', 'ws://').replace('https://', 'wss://');
+            if (wsUrl.includes('/ws')) {
+                wsUrl = wsUrl.replace('/ws', '/ws-native');
+            } else {
+                wsUrl = wsUrl + '/ws-native';
+            }
+            
+            // Add JWT token to URL
+            wsUrl += '?token=' + encodeURIComponent(jwtToken);
+            
+            setConnectionStatus('connecting', 'Đang kết nối...');
+            addMessage('Đang kết nối đến native WebSocket: ' + wsUrl, 'sent');
+            addMessage('Using JWT token for native WebSocket authentication', 'sent');
+
+            // Create native WebSocket connection
+            const socket = new WebSocket(wsUrl);
+            
+            socket.onopen = function() {
+                addMessage('✅ Native WebSocket connection opened', 'received');
+            };
+            
+            socket.onclose = function(event) {
+                addMessage('❌ Native WebSocket connection closed: ' + event.code + ' - ' + event.reason, 'error');
+                connected = false;
+                setConnectionStatus('disconnected', 'Native WebSocket connection closed');
+            };
+            
+            socket.onerror = function(error) {
+                addMessage('❌ Native WebSocket error: ' + JSON.stringify(error), 'error');
+                connected = false;
+                setConnectionStatus('disconnected', 'Native WebSocket error');
+            };
+            
+            socket.onmessage = function(event) {
+                addMessage('Native WebSocket message: ' + event.data, 'received');
+            };
+            
+            stompClient = Stomp.over(socket);
+            
+            // Enable debug logging to see what's happening
+            stompClient.debug = function(str) {
+                console.log('STOMP DEBUG (Native): ' + str);
+                addMessage('STOMP (Native): ' + str, 'received');
+            };
+            
+            // Add error handler for connection issues
+            stompClient.onStompError = function (frame) {
+                console.error('STOMP Error Frame:', frame);
+                addMessage('❌ STOMP Error: ' + frame.headers['message'], 'error');
+                addMessage('Error Details: ' + frame.body, 'error');
+                setConnectionStatus('disconnected', 'STOMP Error: ' + frame.headers['message']);
+            };
+            
+            // Headers with JWT token
+            const headers = {
+                'Authorization': 'Bearer ' + jwtToken,
+                'token': jwtToken,
+                'accept-version': '1.0,1.1,1.2',
+                'heart-beat': '0,0'
+            };
+
+            // Add connection timeout
+            const connectTimeout = setTimeout(() => {
+                if (!connected) {
+                    addMessage('❌ Connection timeout - taking too long to connect', 'error');
+                    setConnectionStatus('disconnected', 'Connection timeout');
+                    if (stompClient) {
+                        stompClient.disconnect();
+                    }
+                    if (socket) {
+                        socket.close();
+                    }
+                }
+            }, 30000); // 30 second timeout
+
+            try {
+                stompClient.connect(headers, (frame) => {
+                    clearTimeout(connectTimeout);
+                    onConnected(frame);
+                }, (error) => {
+                    clearTimeout(connectTimeout);
+                    onError(error);
+                });
+            } catch (error) {
+                clearTimeout(connectTimeout);
+                addMessage('❌ Error during STOMP connect: ' + error.message, 'error');
+                console.error('STOMP connect error:', error);
+                onError(error);
+            }
+        }
+
+        function testBasicStomp() {
+            const serverUrl = document.getElementById('serverUrl').value;
+            const userId = document.getElementById('userId').value || 'user123';
+            const jwtToken = document.getElementById('jwtToken').value.trim();
+            
+            if (!jwtToken) {
+                addMessage('❌ JWT token is required for STOMP connection. Please login first.', 'error');
+                return;
+            }
+            
+            addMessage('🧪 Testing basic STOMP connection...', 'sent');
+            setConnectionStatus('connecting', 'Testing STOMP...');
+            
+            // Simple SockJS connection with JWT token
+            const socketUrl = serverUrl + '?token=' + encodeURIComponent(jwtToken);
+            const socket = new SockJS(socketUrl);
+            
+            socket.onopen = function() {
+                addMessage('✅ SockJS opened', 'received');
+                
+                // Create STOMP client
+                const stomp = Stomp.over(socket);
+                
+                // Very verbose debug
+                stomp.debug = function(str) {
+                    addMessage('STOMP: ' + str, 'received');
+                    console.log('STOMP: ' + str);
+                };
+                
+                // Simple headers with JWT token
+                const headers = {
+                    'Authorization': 'Bearer ' + jwtToken,
+                    'token': jwtToken
+                };
+                
+                addMessage('🔄 Sending STOMP CONNECT...', 'sent');
+                
+                // Connect with minimal setup
+                stomp.connect(headers, 
+                    function(frame) {
+                        addMessage('✅ STOMP CONNECT SUCCESS!', 'received');
+                        addMessage('Frame: ' + JSON.stringify(frame), 'received');
+                        connected = true;
+                        stompClient = stomp;
+                        setConnectionStatus('connected', 'STOMP Connected');
+                    },
+                    function(error) {
+                        addMessage('❌ STOMP CONNECT FAILED: ' + error, 'error');
+                        setConnectionStatus('disconnected', 'STOMP Connect Failed');
+                    }
+                );
+            };
+            
+            socket.onclose = function(event) {
+                addMessage('❌ SockJS closed: ' + event.code + ' - ' + event.reason, 'error');
+                setConnectionStatus('disconnected', 'SockJS closed');
+            };
+            
+            socket.onerror = function(error) {
+                addMessage('❌ SockJS error: ' + error, 'error');
+                setConnectionStatus('disconnected', 'SockJS error');
+            };
         }
 
         async function login() {
             const loginUrl = document.getElementById('loginUrl').value;
-            const email = document.getElementById('email').value;
+            const username = document.getElementById('username').value;
             const password = document.getElementById('password').value;
             
-            if (!email || !password) {
-                addMessage('Vui lòng nhập email và password', 'error');
+            if (!username || !password) {
+                addMessage('Vui lòng nhập username và password', 'error');
                 return;
             }
 
@@ -163,7 +496,7 @@
                         'Content-Type': 'application/json',
                     },
                     body: JSON.stringify({
-                        username: email,
+                        username: username,
                         password: password
                     })
                 });
@@ -209,56 +542,505 @@
             });
         }
 
+        function testServer() {
+            addMessage('Testing server WebSocket status...', 'sent');
+            
+            fetch('http://localhost:8080/api/websocket/status')
+            .then(response => {
+                if (response.ok) {
+                    return response.json();
+                } else {
+                    throw new Error('Status: ' + response.status);
+                }
+            })
+            .then(data => {
+                addMessage('✅ Server status: ' + data.status, 'received');
+                addMessage('Server message: ' + data.message, 'received');
+                addMessage('Available endpoints: ' + JSON.stringify(data.endpoints), 'received');
+            })
+            .catch(error => {
+                addMessage('❌ Server test failed: ' + error.message, 'error');
+            });
+        }
+
+        function debugUser() {
+            const username = document.getElementById('username').value;
+            
+            if (!username) {
+                addMessage('Vui lòng nhập username', 'error');
+                return;
+            }
+            
+            addMessage('🔍 Debugging user: ' + username, 'sent');
+            
+            fetch('http://localhost:8080/api/debug/auth/user/' + encodeURIComponent(username))
+            .then(response => {
+                if (response.ok) {
+                    return response.json();
+                } else {
+                    throw new Error('Status: ' + response.status);
+                }
+            })
+            .then(data => {
+                addMessage('User debug result:', 'received');
+                addMessage('  Found: ' + data.found, 'received');
+                if (data.found) {
+                    addMessage('  User ID: ' + data.userId, 'received');
+                    addMessage('  Username: ' + data.username, 'received');
+                    addMessage('  Email: ' + data.email, 'received');
+                    addMessage('  Status: ' + data.status, 'received');
+                    addMessage('  Email Verified: ' + data.emailVerified, 'received');
+                    addMessage('  Password Hash Length: ' + data.passwordHashLength, 'received');
+                    addMessage('  Password Hash Prefix: ' + data.passwordHashPrefix, 'received');
+                }
+            })
+            .catch(error => {
+                addMessage('❌ User debug failed: ' + error.message, 'error');
+            });
+        }
+
+        function testPassword() {
+            const username = document.getElementById('username').value;
+            const password = document.getElementById('password').value;
+            
+            if (!username || !password) {
+                addMessage('Vui lòng nhập username và password', 'error');
+                return;
+            }
+            
+            addMessage('🔐 Testing password for: ' + username, 'sent');
+            
+            fetch('http://localhost:8080/api/debug/auth/test-password', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    username: username,
+                    password: password
+                })
+            })
+            .then(response => {
+                if (response.ok) {
+                    return response.json();
+                } else {
+                    throw new Error('Status: ' + response.status);
+                }
+            })
+            .then(data => {
+                addMessage('Password test result:', 'received');
+                addMessage('  User Found: ' + data.userFound, 'received');
+                addMessage('  Password Matches: ' + data.passwordMatches, 'received');
+                if (data.userFound) {
+                    addMessage('  Password Length: ' + data.passwordLength, 'received');
+                    addMessage('  Hash Length: ' + data.hashLength, 'received');
+                    addMessage('  Hash Prefix: ' + data.hashPrefix, 'received');
+                }
+            })
+            .catch(error => {
+                addMessage('❌ Password test failed: ' + error.message, 'error');
+            });
+        }
+
+        function tryDefaultPassword() {
+            const username = document.getElementById('username').value;
+            const defaultPassword = document.getElementById('defaultPassword').value;
+            
+            if (!username || !defaultPassword) {
+                addMessage('Vui lòng nhập username và default password', 'error');
+                return;
+            }
+            
+            // Set password field to default
+            document.getElementById('password').value = defaultPassword;
+            
+            addMessage('Trying default password: ' + defaultPassword, 'sent');
+            
+            // Test password first
+            fetch('http://localhost:8080/api/debug/auth/test-password', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    username: username,
+                    password: defaultPassword
+                })
+            })
+            .then(response => response.json())
+            .then(data => {
+                addMessage('Default password test - Matches: ' + data.passwordMatches, 'received');
+                
+                if (data.passwordMatches) {
+                    addMessage('✅ Default password works! Attempting login...', 'received');
+                    login();
+                } else {
+                    addMessage('❌ Default password does not match', 'error');
+                }
+            })
+            .catch(error => {
+                addMessage('❌ Default password test failed: ' + error.message, 'error');
+            });
+        }
+
+        function refreshJwtToken() {
+            const currentToken = document.getElementById('jwtToken').value.trim();
+            
+            if (!currentToken) {
+                addMessage('❌ No JWT token found - please login first', 'error');
+                return;
+            }
+            
+            addMessage('🔄 Refreshing JWT token...', 'sent');
+            
+            // Try to refresh using the current token
+            fetch('http://localhost:8080/api/auth/refresh', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': 'Bearer ' + currentToken
+                },
+                body: JSON.stringify({
+                    token: currentToken
+                })
+            })
+            .then(response => {
+                if (response.ok) {
+                    return response.json();
+                } else {
+                    throw new Error('Refresh failed: ' + response.status);
+                }
+            })
+            .then(data => {
+                if (data.token || data.accessToken) {
+                    const newToken = data.token || data.accessToken;
+                    document.getElementById('jwtToken').value = newToken;
+                    addMessage('✅ JWT token refreshed successfully', 'received');
+                    
+                    // Auto-reconnect if we were connected
+                    if (connected || stompClient) {
+                        addMessage('🔄 Reconnecting with new token...', 'sent');
+                        disconnect();
+                        setTimeout(() => {
+                            connect();
+                        }, 1000);
+                    }
+                } else {
+                    addMessage('❌ No new token in refresh response', 'error');
+                }
+            })
+            .catch(error => {
+                addMessage('❌ Token refresh failed: ' + error.message, 'error');
+                addMessage('💡 Try logging in again to get a new token', 'received');
+            });
+        }
+
+        function connectSimple() {
+            const serverUrl = document.getElementById('serverUrl').value;
+            const jwtToken = document.getElementById('jwtToken').value.trim();
+            
+            if (!jwtToken) {
+                addMessage('❌ JWT token is required. Please login first.', 'error');
+                return;
+            }
+            
+            setConnectionStatus('connecting', 'Đang kết nối...');
+            addMessage('🔄 Starting simple WebSocket connection...', 'sent');
+            addMessage('Server URL: ' + serverUrl, 'sent');
+            addMessage('JWT Token: ' + jwtToken.substring(0, 50) + '...', 'sent');
+
+            // Add JWT token to URL as query parameter
+            const socketUrl = serverUrl + '?token=' + encodeURIComponent(jwtToken);
+            const socket = new SockJS(socketUrl);
+            
+            socket.onopen = function() {
+                addMessage('✅ SockJS connection opened', 'received');
+                
+                // Create STOMP client
+                stompClient = Stomp.over(socket);
+                
+                // Enable debug logging
+                stompClient.debug = function(str) {
+                    console.log('STOMP DEBUG: ' + str);
+                    addMessage('STOMP: ' + str, 'received');
+                };
+                
+                // Headers with JWT token
+                const headers = {
+                    'Authorization': 'Bearer ' + jwtToken,
+                    'token': jwtToken,
+                    'accept-version': '1.0,1.1,1.2',
+                    'heart-beat': '0,0'
+                };
+
+                addMessage('🔄 Starting STOMP connection with headers: ' + JSON.stringify(headers), 'sent');
+                
+                // Connect STOMP
+                stompClient.connect(headers, 
+                    function(frame) {
+                        addMessage('✅ STOMP connected successfully!', 'received');
+                        addMessage('Frame: ' + JSON.stringify(frame), 'received');
+                        onConnected(frame);
+                    },
+                    function(error) {
+                        addMessage('❌ STOMP connection failed: ' + error, 'error');
+                        onError(error);
+                    }
+                );
+            };
+            
+            socket.onclose = function(event) {
+                addMessage('❌ SockJS connection closed: ' + event.code + ' - ' + event.reason, 'error');
+                connected = false;
+                stopHeartbeat();
+                setConnectionStatus('disconnected', 'SockJS connection closed');
+            };
+            
+            socket.onerror = function(error) {
+                addMessage('❌ SockJS error: ' + JSON.stringify(error), 'error');
+                onError(error);
+            };
+        }
+
+        function connectDirect() {
+            const serverUrl = document.getElementById('serverUrl').value;
+            const jwtToken = document.getElementById('jwtToken').value.trim();
+            
+            if (!jwtToken) {
+                addMessage('❌ JWT token is required. Please login first.', 'error');
+                return;
+            }
+            
+            setConnectionStatus('connecting', 'Đang kết nối...');
+            addMessage('🔄 Starting DIRECT WebSocket connection...', 'sent');
+            addMessage('Server URL: ' + serverUrl, 'sent');
+            addMessage('JWT Token: ' + jwtToken.substring(0, 50) + '...', 'sent');
+
+            // Add JWT token to URL as query parameter
+            const socketUrl = serverUrl + '?token=' + encodeURIComponent(jwtToken);
+            addMessage('Socket URL: ' + socketUrl.substring(0, 100) + '...', 'sent');
+            
+            const socket = new SockJS(socketUrl);
+            
+            socket.onopen = function() {
+                addMessage('✅ SockJS connection opened - creating STOMP client immediately', 'received');
+                
+                // Create STOMP client immediately
+                stompClient = Stomp.over(socket);
+                
+                // Enable debug logging
+                stompClient.debug = function(str) {
+                    console.log('STOMP DEBUG: ' + str);
+                    addMessage('STOMP: ' + str, 'received');
+                };
+                
+                // Headers with JWT token
+                const headers = {
+                    'Authorization': 'Bearer ' + jwtToken,
+                    'token': jwtToken,
+                    'accept-version': '1.0,1.1,1.2',
+                    'heart-beat': '0,0'
+                };
+
+                addMessage('🔄 Calling stompClient.connect() NOW...', 'sent');
+                
+                // Connect STOMP immediately - no timeout or delay
+                try {
+                    stompClient.connect(headers, 
+                        function(frame) {
+                            addMessage('✅ STOMP connected successfully!', 'received');
+                            addMessage('Frame: ' + JSON.stringify(frame), 'received');
+                            onConnected(frame);
+                        },
+                        function(error) {
+                            addMessage('❌ STOMP connection failed: ' + error, 'error');
+                            onError(error);
+                        }
+                    );
+                    addMessage('✅ stompClient.connect() called successfully', 'received');
+                } catch (error) {
+                    addMessage('❌ Error calling stompClient.connect(): ' + error.message, 'error');
+                    onError(error);
+                }
+            };
+            
+            socket.onclose = function(event) {
+                addMessage('❌ SockJS connection closed: ' + event.code + ' - ' + event.reason, 'error');
+                connected = false;
+                stopHeartbeat();
+                setConnectionStatus('disconnected', 'SockJS connection closed');
+            };
+            
+            socket.onerror = function(error) {
+                addMessage('❌ SockJS error: ' + JSON.stringify(error), 'error');
+                onError(error);
+            };
+        }
+
+        function connectPureWebSocket() {
+            const serverUrl = document.getElementById('serverUrl').value;
+            const jwtToken = document.getElementById('jwtToken').value.trim();
+            
+            if (!jwtToken) {
+                addMessage('❌ JWT token is required. Please login first.', 'error');
+                return;
+            }
+            
+            setConnectionStatus('connecting', 'Đang kết nối...');
+            addMessage('🔄 Starting PURE WebSocket connection (NO STOMP)...', 'sent');
+            addMessage('Server URL: ' + serverUrl, 'sent');
+            addMessage('JWT Token: ' + jwtToken.substring(0, 50) + '...', 'sent');
+
+            // Convert to pure WebSocket URL
+            let wsUrl = serverUrl.replace('http://', 'ws://').replace('https://', 'wss://');
+            wsUrl = wsUrl.replace('/ws', '/ws-pure');
+            wsUrl += '?token=' + encodeURIComponent(jwtToken);
+            
+            addMessage('WebSocket URL: ' + wsUrl.substring(0, 100) + '...', 'sent');
+            
+            try {
+                const socket = new WebSocket(wsUrl);
+                
+                socket.onopen = function() {
+                    addMessage('✅ Pure WebSocket connection opened successfully!', 'received');
+                    connected = true;
+                    setConnectionStatus('connected', 'Đã kết nối thành công');
+                    
+                    // Enable Portfolio Operations buttons immediately
+                    document.getElementById('subscribeBtn').disabled = false;
+                    document.getElementById('listBtn').disabled = false;
+                    document.getElementById('refreshBtn').disabled = false;
+                    document.getElementById('unsubscribeBtn').disabled = false;
+                    
+                    addMessage('✅ Portfolio Operations buttons enabled', 'received');
+                    
+                    // Store the socket for later use
+                    stompClient = {
+                        socket: socket,
+                        send: function(destination, headers, body) {
+                            const message = {
+                                destination: destination,
+                                headers: headers || {},
+                                body: body || ''
+                            };
+                            socket.send(JSON.stringify(message));
+                            addMessage('📤 Sent message to: ' + destination, 'sent');
+                        }
+                    };
+                };
+                
+                socket.onmessage = function(event) {
+                    addMessage('📥 WebSocket message received: ' + event.data, 'received');
+                    try {
+                        const data = JSON.parse(event.data);
+                        if (data.type === 'portfolio') {
+                            displayPortfolioData(data.data);
+                        } else if (data.type === 'portfolio-list') {
+                            displayPortfolioList(data.data);
+                        }
+                    } catch (e) {
+                        addMessage('📥 Raw message: ' + event.data, 'received');
+                    }
+                };
+                
+                socket.onclose = function(event) {
+                    addMessage('❌ WebSocket connection closed: ' + event.code + ' - ' + event.reason, 'error');
+                    connected = false;
+                    setConnectionStatus('disconnected', 'WebSocket connection closed');
+                    
+                    // Disable buttons
+                    document.getElementById('subscribeBtn').disabled = true;
+                    document.getElementById('listBtn').disabled = true;
+                    document.getElementById('refreshBtn').disabled = true;
+                    document.getElementById('unsubscribeBtn').disabled = true;
+                };
+                
+                socket.onerror = function(error) {
+                    addMessage('❌ WebSocket error: ' + JSON.stringify(error), 'error');
+                    onError(error);
+                };
+                
+            } catch (error) {
+                addMessage('❌ Error creating WebSocket: ' + error.message, 'error');
+                onError(error);
+            }
+        }
+
         function onConnected(frame) {
             connected = true;
             setConnectionStatus('connected', 'Đã kết nối thành công');
             addMessage('✅ Kết nối WebSocket thành công!', 'received');
+            addMessage('✅ STOMP Frame: ' + JSON.stringify(frame), 'received');
             console.log('Connected: ' + frame);
             
-            // Enable buttons
+            // Extract userId from JWT token if available
+            try {
+                const jwtToken = document.getElementById('jwtToken').value.trim();
+                if (jwtToken) {
+                    const payload = JSON.parse(atob(jwtToken.split('.')[1]));
+                    if (payload.userId) {
+                        document.getElementById('userId').value = payload.userId;
+                        currentUserId = payload.userId;
+                        addMessage('✅ Extracted userId from JWT: ' + payload.userId, 'received');
+                    }
+                }
+            } catch (error) {
+                addMessage('⚠️ Could not extract userId from JWT token', 'received');
+            }
+            
+            // Always enable buttons when connected - even if authentication partially failed
+            // The backend will handle permission checks
             document.getElementById('subscribeBtn').disabled = false;
             document.getElementById('listBtn').disabled = false;
             document.getElementById('refreshBtn').disabled = false;
             document.getElementById('unsubscribeBtn').disabled = false;
+            
+            addMessage('✅ Portfolio Operations buttons enabled', 'received');
 
-            // Test basic functionality first
-            testBasicConnection();
-            
-            // Subscribe to test topics
-            stompClient.subscribe('/topic/echo', function (message) {
-                addMessage('Echo received: ' + message.body, 'received');
-            });
-            
-            stompClient.subscribe('/topic/ping', function (message) {
-                addMessage('Ping response: ' + message.body, 'received');
-            });
-            
-            stompClient.subscribe('/topic/hello', function (message) {
-                addMessage('Hello response: ' + message.body, 'received');
-            });
+            // Subscribe to test topics first (safer subscriptions)
+            try {
+                stompClient.subscribe('/topic/echo', function (message) {
+                    addMessage('Echo received: ' + message.body, 'received');
+                });
+                addMessage('✅ Subscribed to /topic/echo', 'received');
+                
+                stompClient.subscribe('/topic/ping', function (message) {
+                    addMessage('Ping response: ' + message.body, 'received');
+                });
+                addMessage('✅ Subscribed to /topic/ping', 'received');
+                
+                stompClient.subscribe('/topic/hello', function (message) {
+                    addMessage('Hello response: ' + message.body, 'received');
+                });
+                addMessage('✅ Subscribed to /topic/hello', 'received');
+                
+                stompClient.subscribe('/topic/connection', function (message) {
+                    addMessage('Connection test response: ' + message.body, 'received');
+                });
+                addMessage('✅ Subscribed to /topic/connection', 'received');
+                
+                stompClient.subscribe('/topic/broadcast', function (message) {
+                    addMessage('Broadcast received: ' + message.body, 'received');
+                });
+                addMessage('✅ Subscribed to /topic/broadcast', 'received');
+                
+            } catch (error) {
+                addMessage('❌ Error subscribing to topics: ' + error.message, 'error');
+                console.error('Subscription error:', error);
+            }
 
-            // Subscribe to user-specific queues
+            // Subscribe to user-specific queues later (after connection is stable)
             currentUserId = document.getElementById('userId').value;
+            addMessage('ℹ️ Skipping user-specific subscriptions for now (will add when needed)', 'received');
             
-            // Subscribe to portfolio updates
-            stompClient.subscribe('/user/queue/portfolio', function (message) {
-                addMessage('Portfolio Update nhận được', 'received');
-                const portfolioData = JSON.parse(message.body);
-                displayPortfolioData(portfolioData);
-            });
-
-            // Subscribe to portfolio list
-            stompClient.subscribe('/user/queue/portfolio-list', function (message) {
-                addMessage('Portfolio List nhận được', 'received');
-                const portfolioList = JSON.parse(message.body);
-                displayPortfolioList(portfolioList);
-            });
-
-            // Subscribe to errors
-            stompClient.subscribe('/user/queue/errors', function (message) {
-                addMessage('Error nhận được: ' + message.body, 'error');
-                console.error('WebSocket Error:', message.body);
-            });
+            // Test basic functionality after subscriptions
+            setTimeout(() => {
+                if (connected) {
+                    testBasicConnection();
+                    testDebugEndpoints();
+                    startHeartbeat();
+                }
+            }, 1000);
         }
         
         function testBasicConnection() {
@@ -290,18 +1072,78 @@
                 }
             }, 3000);
         }
+        
+        function testDebugEndpoints() {
+            if (!connected) return;
+            
+            addMessage('Testing debug endpoints...', 'sent');
+            
+            // Subscribe to debug topics
+            try {
+                stompClient.subscribe('/topic/debug/pong', function (message) {
+                    addMessage('Debug Pong: ' + message.body, 'received');
+                });
+                
+                stompClient.subscribe('/user/queue/debug/echo', function (message) {
+                    addMessage('Debug Echo: ' + message.body, 'received');
+                });
+                
+                stompClient.subscribe('/topic/debug/test', function (message) {
+                    addMessage('Debug Test: ' + message.body, 'received');
+                });
+                
+                addMessage('✅ Subscribed to debug topics', 'received');
+            } catch (error) {
+                addMessage('❌ Error subscribing to debug topics: ' + error.message, 'error');
+            }
+            
+            // Test debug endpoints
+            setTimeout(() => {
+                if (connected) {
+                    stompClient.send('/app/debug/ping', {}, '');
+                    addMessage('Sent debug ping', 'sent');
+                }
+            }, 500);
+            
+            setTimeout(() => {
+                if (connected) {
+                    stompClient.send('/app/debug/echo', {}, 'Debug echo test');
+                    addMessage('Sent debug echo', 'sent');
+                }
+            }, 1000);
+            
+            setTimeout(() => {
+                if (connected) {
+                    stompClient.send('/app/debug/test', {}, '');
+                    addMessage('Sent debug test', 'sent');
+                }
+            }, 1500);
+        }
 
         function onError(error) {
             connected = false;
+            stopHeartbeat();
             setConnectionStatus('disconnected', 'Lỗi kết nối: ' + error);
-            addMessage('Lỗi kết nối: ' + error, 'error');
+            addMessage('❌ Lỗi kết nối: ' + error, 'error');
             console.error('WebSocket Error:', error);
+            
+            // Add more detailed error information
+            if (error && error.toString().includes('401')) {
+                addMessage('❌ Authentication failed - please check JWT token', 'error');
+            } else if (error && error.toString().includes('403')) {
+                addMessage('❌ Authorization failed - insufficient permissions', 'error');
+            } else if (error && error.toString().includes('timeout')) {
+                addMessage('❌ Connection timeout - server may be down', 'error');
+            }
             
             // Disable buttons
             document.getElementById('subscribeBtn').disabled = true;
             document.getElementById('listBtn').disabled = true;
             document.getElementById('refreshBtn').disabled = true;
             document.getElementById('unsubscribeBtn').disabled = true;
+            
+            // Suggest retry after a few seconds
+            addMessage('💡 Tip: Try refreshing JWT token and reconnecting', 'received');
         }
 
         function disconnect() {
@@ -309,6 +1151,7 @@
                 stompClient.disconnect();
             }
             connected = false;
+            stopHeartbeat();
             setConnectionStatus('disconnected', 'Đã ngắt kết nối');
             addMessage('Đã ngắt kết nối WebSocket', 'sent');
             
@@ -325,8 +1168,17 @@
             const userId = document.getElementById('userId').value;
             addMessage('Subscribing to portfolio for user: ' + userId, 'sent');
             
-            // Send subscription request
-            stompClient.send('/app/portfolio/subscribe/' + userId, {}, '');
+            if (stompClient && stompClient.socket) {
+                // Pure WebSocket message
+                const message = {
+                    action: 'portfolio/subscribe',
+                    userId: userId
+                };
+                stompClient.socket.send(JSON.stringify(message));
+                addMessage('📤 Sent portfolio subscribe request', 'sent');
+            } else {
+                addMessage('❌ WebSocket not connected', 'error');
+            }
         }
 
         function getPortfolioList() {
@@ -338,6 +1190,7 @@
             const size = parseInt(document.getElementById('size').value);
             
             const request = {
+                action: 'portfolio/list',
                 userId: userId,
                 includeBalances: includeBalances,
                 page: page,
@@ -345,7 +1198,13 @@
             };
             
             addMessage('Getting portfolio list: ' + JSON.stringify(request), 'sent');
-            stompClient.send('/app/portfolio/list', {}, JSON.stringify(request));
+            
+            if (stompClient && stompClient.socket) {
+                stompClient.socket.send(JSON.stringify(request));
+                addMessage('📤 Sent portfolio list request', 'sent');
+            } else {
+                addMessage('❌ WebSocket not connected', 'error');
+            }
         }
 
         function refreshPortfolio() {
@@ -355,12 +1214,19 @@
             const refreshCache = document.getElementById('refreshCache').checked;
             
             const request = {
+                action: 'portfolio/update',
                 userId: userId,
                 refreshCache: refreshCache
             };
             
             addMessage('Requesting portfolio update: ' + JSON.stringify(request), 'sent');
-            stompClient.send('/app/portfolio/update', {}, JSON.stringify(request));
+            
+            if (stompClient && stompClient.socket) {
+                stompClient.socket.send(JSON.stringify(request));
+                addMessage('📤 Sent portfolio update request', 'sent');
+            } else {
+                addMessage('❌ WebSocket not connected', 'error');
+            }
         }
 
         function unsubscribePortfolio() {
@@ -369,7 +1235,56 @@
             const userId = document.getElementById('userId').value;
             addMessage('Unsubscribing from portfolio for user: ' + userId, 'sent');
             
-            stompClient.send('/app/portfolio/unsubscribe/' + userId, {}, '');
+            if (stompClient && stompClient.socket) {
+                const message = {
+                    action: 'portfolio/unsubscribe',
+                    userId: userId
+                };
+                stompClient.socket.send(JSON.stringify(message));
+                addMessage('📤 Sent portfolio unsubscribe request', 'sent');
+            } else {
+                addMessage('❌ WebSocket not connected', 'error');
+            }
+        }
+
+        function startHeartbeat() {
+            if (heartbeatInterval) {
+                clearInterval(heartbeatInterval);
+            }
+            
+            // Subscribe to keepalive response
+            try {
+                stompClient.subscribe('/topic/keepalive', function (message) {
+                    const data = JSON.parse(message.body);
+                    console.log('Heartbeat response:', data);
+                    // Don't spam the UI with heartbeat messages
+                });
+            } catch (error) {
+                console.error('Error subscribing to keepalive:', error);
+            }
+            
+            // Send heartbeat every 30 seconds
+            heartbeatInterval = setInterval(() => {
+                if (connected && stompClient) {
+                    try {
+                        stompClient.send('/app/test/keepalive', {}, '');
+                        console.log('Heartbeat sent');
+                    } catch (error) {
+                        console.error('Error sending heartbeat:', error);
+                        addMessage('❌ Heartbeat failed: ' + error.message, 'error');
+                    }
+                }
+            }, 30000);
+            
+            addMessage('✅ Heartbeat started (30s interval)', 'received');
+        }
+
+        function stopHeartbeat() {
+            if (heartbeatInterval) {
+                clearInterval(heartbeatInterval);
+                heartbeatInterval = null;
+                addMessage('🔴 Heartbeat stopped', 'received');
+            }
         }
 
         function setConnectionStatus(status, message) {

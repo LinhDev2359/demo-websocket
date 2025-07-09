@@ -2,6 +2,7 @@ package com.wallet.config;
 
 import com.wallet.websocket.WebSocketJwtAuthInterceptor;
 import com.wallet.websocket.WebSocketDefaultUserInterceptor;
+import com.wallet.controller.PureWebSocketController;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -12,8 +13,11 @@ import org.springframework.messaging.simp.config.ChannelRegistration;
 import org.springframework.messaging.simp.config.MessageBrokerRegistry;
 import org.springframework.scheduling.TaskScheduler;
 import org.springframework.web.socket.WebSocketHandler;
+import org.springframework.web.socket.config.annotation.EnableWebSocket;
 import org.springframework.web.socket.config.annotation.EnableWebSocketMessageBroker;
 import org.springframework.web.socket.config.annotation.StompEndpointRegistry;
+import org.springframework.web.socket.config.annotation.WebSocketConfigurer;
+import org.springframework.web.socket.config.annotation.WebSocketHandlerRegistry;
 import org.springframework.web.socket.config.annotation.WebSocketMessageBrokerConfigurer;
 import org.springframework.web.socket.server.HandshakeInterceptor;
 
@@ -35,13 +39,15 @@ import java.util.Map;
  * - JWT authentication trên mọi WebSocket messages
  */
 @Configuration
+@EnableWebSocket
 @EnableWebSocketMessageBroker
 @RequiredArgsConstructor
 @Slf4j
-public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
+public class WebSocketConfig implements WebSocketMessageBrokerConfigurer, WebSocketConfigurer {
 
     private final WebSocketJwtAuthInterceptor jwtAuthInterceptor;
     private final WebSocketDefaultUserInterceptor defaultUserInterceptor;
+    private final PureWebSocketController pureWebSocketController;
     
     @Autowired(required = false)
     private TaskScheduler webSocketHeartbeatTaskScheduler;
@@ -248,5 +254,60 @@ public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
                 .keepAliveSeconds(60);
         
         log.info("✅ Outbound channel configured for optimal performance");
+    }
+
+    /**
+     * Configure Pure WebSocket Handlers (NO STOMP)
+     * 
+     * This provides an alternative to STOMP for Portfolio Operations
+     * Uses pure WebSocket with JWT authentication
+     */
+    @Override
+    public void registerWebSocketHandlers(WebSocketHandlerRegistry registry) {
+        log.info("Configuring Pure WebSocket handlers");
+        
+        registry.addHandler(pureWebSocketController, "/ws-pure")
+                .setAllowedOriginPatterns("*")
+                .addInterceptors(new HandshakeInterceptor() {
+                    @Override
+                    public boolean beforeHandshake(ServerHttpRequest request, ServerHttpResponse response,
+                                                   WebSocketHandler wsHandler, Map<String, Object> attributes) throws Exception {
+                        log.info("Pure WebSocket handshake starting - URI: {}", request.getURI());
+                        
+                        // Extract JWT token from URL parameters
+                        String query = request.getURI().getQuery();
+                        if (query != null && query.contains("token=")) {
+                            String[] params = query.split("&");
+                            for (String param : params) {
+                                if (param.startsWith("token=")) {
+                                    String token = param.substring(6); // Remove "token=" prefix
+                                    String decodedToken = java.net.URLDecoder.decode(token, "UTF-8");
+                                    attributes.put("token", decodedToken);
+                                    log.info("JWT token extracted for pure WebSocket");
+                                    log.debug("Token length: {}, starts with: {}", 
+                                            decodedToken.length(), 
+                                            decodedToken.substring(0, Math.min(20, decodedToken.length())));
+                                    return true; // Allow handshake
+                                }
+                            }
+                        }
+                        
+                        log.warn("No token parameter found in pure WebSocket handshake URL");
+                        response.setStatusCode(org.springframework.http.HttpStatus.UNAUTHORIZED);
+                        return false; // Reject handshake
+                    }
+                    
+                    @Override
+                    public void afterHandshake(ServerHttpRequest request, ServerHttpResponse response,
+                                               WebSocketHandler wsHandler, Exception exception) {
+                        if (exception != null) {
+                            log.error("Pure WebSocket handshake failed: ", exception);
+                        } else {
+                            log.info("Pure WebSocket handshake completed successfully");
+                        }
+                    }
+                });
+        
+        log.info("✅ Pure WebSocket handler registered at /ws-pure");
     }
 }

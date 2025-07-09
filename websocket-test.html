@@ -44,6 +44,7 @@
                 <button onclick="testBasicStomp()">Test Basic STOMP (JWT)</button>
                 <button onclick="connectSimple()">Connect Simple (Fixed)</button>
                 <button onclick="connectDirect()">Connect Direct (Debug)</button>
+                <button onclick="connectPureWebSocket()">Connect Pure WebSocket (No STOMP)</button>
                 <button onclick="disconnect()">Ngắt kết nối</button>
             </div>
             <div id="connectionStatus" class="status disconnected">Chưa kết nối</div>
@@ -876,6 +877,95 @@
             };
         }
 
+        function connectPureWebSocket() {
+            const serverUrl = document.getElementById('serverUrl').value;
+            const jwtToken = document.getElementById('jwtToken').value.trim();
+            
+            if (!jwtToken) {
+                addMessage('❌ JWT token is required. Please login first.', 'error');
+                return;
+            }
+            
+            setConnectionStatus('connecting', 'Đang kết nối...');
+            addMessage('🔄 Starting PURE WebSocket connection (NO STOMP)...', 'sent');
+            addMessage('Server URL: ' + serverUrl, 'sent');
+            addMessage('JWT Token: ' + jwtToken.substring(0, 50) + '...', 'sent');
+
+            // Convert to pure WebSocket URL
+            let wsUrl = serverUrl.replace('http://', 'ws://').replace('https://', 'wss://');
+            wsUrl = wsUrl.replace('/ws', '/ws-pure');
+            wsUrl += '?token=' + encodeURIComponent(jwtToken);
+            
+            addMessage('WebSocket URL: ' + wsUrl.substring(0, 100) + '...', 'sent');
+            
+            try {
+                const socket = new WebSocket(wsUrl);
+                
+                socket.onopen = function() {
+                    addMessage('✅ Pure WebSocket connection opened successfully!', 'received');
+                    connected = true;
+                    setConnectionStatus('connected', 'Đã kết nối thành công');
+                    
+                    // Enable Portfolio Operations buttons immediately
+                    document.getElementById('subscribeBtn').disabled = false;
+                    document.getElementById('listBtn').disabled = false;
+                    document.getElementById('refreshBtn').disabled = false;
+                    document.getElementById('unsubscribeBtn').disabled = false;
+                    
+                    addMessage('✅ Portfolio Operations buttons enabled', 'received');
+                    
+                    // Store the socket for later use
+                    stompClient = {
+                        socket: socket,
+                        send: function(destination, headers, body) {
+                            const message = {
+                                destination: destination,
+                                headers: headers || {},
+                                body: body || ''
+                            };
+                            socket.send(JSON.stringify(message));
+                            addMessage('📤 Sent message to: ' + destination, 'sent');
+                        }
+                    };
+                };
+                
+                socket.onmessage = function(event) {
+                    addMessage('📥 WebSocket message received: ' + event.data, 'received');
+                    try {
+                        const data = JSON.parse(event.data);
+                        if (data.type === 'portfolio') {
+                            displayPortfolioData(data.data);
+                        } else if (data.type === 'portfolio-list') {
+                            displayPortfolioList(data.data);
+                        }
+                    } catch (e) {
+                        addMessage('📥 Raw message: ' + event.data, 'received');
+                    }
+                };
+                
+                socket.onclose = function(event) {
+                    addMessage('❌ WebSocket connection closed: ' + event.code + ' - ' + event.reason, 'error');
+                    connected = false;
+                    setConnectionStatus('disconnected', 'WebSocket connection closed');
+                    
+                    // Disable buttons
+                    document.getElementById('subscribeBtn').disabled = true;
+                    document.getElementById('listBtn').disabled = true;
+                    document.getElementById('refreshBtn').disabled = true;
+                    document.getElementById('unsubscribeBtn').disabled = true;
+                };
+                
+                socket.onerror = function(error) {
+                    addMessage('❌ WebSocket error: ' + JSON.stringify(error), 'error');
+                    onError(error);
+                };
+                
+            } catch (error) {
+                addMessage('❌ Error creating WebSocket: ' + error.message, 'error');
+                onError(error);
+            }
+        }
+
         function onConnected(frame) {
             connected = true;
             setConnectionStatus('connected', 'Đã kết nối thành công');
@@ -1078,38 +1168,17 @@
             const userId = document.getElementById('userId').value;
             addMessage('Subscribing to portfolio for user: ' + userId, 'sent');
             
-            // First subscribe to user queues if not already done
-            try {
-                // Subscribe to portfolio updates
-                stompClient.subscribe('/user/queue/portfolio', function (message) {
-                    addMessage('Portfolio Update nhận được', 'received');
-                    const portfolioData = JSON.parse(message.body);
-                    displayPortfolioData(portfolioData);
-                });
-                addMessage('✅ Subscribed to portfolio updates queue', 'received');
-
-                // Subscribe to portfolio list
-                stompClient.subscribe('/user/queue/portfolio-list', function (message) {
-                    addMessage('Portfolio List nhận được', 'received');
-                    const portfolioList = JSON.parse(message.body);
-                    displayPortfolioList(portfolioList);
-                });
-                addMessage('✅ Subscribed to portfolio list queue', 'received');
-
-                // Subscribe to errors
-                stompClient.subscribe('/user/queue/errors', function (message) {
-                    addMessage('Error nhận được: ' + message.body, 'error');
-                    console.error('WebSocket Error:', message.body);
-                });
-                addMessage('✅ Subscribed to error queue', 'received');
-                
-            } catch (error) {
-                addMessage('❌ Error subscribing to user queues: ' + error.message, 'error');
-                console.error('User queue subscription error:', error);
+            if (stompClient && stompClient.socket) {
+                // Pure WebSocket message
+                const message = {
+                    action: 'portfolio/subscribe',
+                    userId: userId
+                };
+                stompClient.socket.send(JSON.stringify(message));
+                addMessage('📤 Sent portfolio subscribe request', 'sent');
+            } else {
+                addMessage('❌ WebSocket not connected', 'error');
             }
-            
-            // Then send subscription request
-            stompClient.send('/app/portfolio/subscribe/' + userId, {}, '');
         }
 
         function getPortfolioList() {
@@ -1121,6 +1190,7 @@
             const size = parseInt(document.getElementById('size').value);
             
             const request = {
+                action: 'portfolio/list',
                 userId: userId,
                 includeBalances: includeBalances,
                 page: page,
@@ -1128,7 +1198,13 @@
             };
             
             addMessage('Getting portfolio list: ' + JSON.stringify(request), 'sent');
-            stompClient.send('/app/portfolio/list', {}, JSON.stringify(request));
+            
+            if (stompClient && stompClient.socket) {
+                stompClient.socket.send(JSON.stringify(request));
+                addMessage('📤 Sent portfolio list request', 'sent');
+            } else {
+                addMessage('❌ WebSocket not connected', 'error');
+            }
         }
 
         function refreshPortfolio() {
@@ -1138,12 +1214,19 @@
             const refreshCache = document.getElementById('refreshCache').checked;
             
             const request = {
+                action: 'portfolio/update',
                 userId: userId,
                 refreshCache: refreshCache
             };
             
             addMessage('Requesting portfolio update: ' + JSON.stringify(request), 'sent');
-            stompClient.send('/app/portfolio/update', {}, JSON.stringify(request));
+            
+            if (stompClient && stompClient.socket) {
+                stompClient.socket.send(JSON.stringify(request));
+                addMessage('📤 Sent portfolio update request', 'sent');
+            } else {
+                addMessage('❌ WebSocket not connected', 'error');
+            }
         }
 
         function unsubscribePortfolio() {
@@ -1152,7 +1235,16 @@
             const userId = document.getElementById('userId').value;
             addMessage('Unsubscribing from portfolio for user: ' + userId, 'sent');
             
-            stompClient.send('/app/portfolio/unsubscribe/' + userId, {}, '');
+            if (stompClient && stompClient.socket) {
+                const message = {
+                    action: 'portfolio/unsubscribe',
+                    userId: userId
+                };
+                stompClient.socket.send(JSON.stringify(message));
+                addMessage('📤 Sent portfolio unsubscribe request', 'sent');
+            } else {
+                addMessage('❌ WebSocket not connected', 'error');
+            }
         }
 
         function startHeartbeat() {

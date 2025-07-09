@@ -83,7 +83,7 @@ public class SecurityConfig {
                 ).permitAll()
                 
                 // WebSocket endpoints - require authentication at handshake level
-                .requestMatchers("/ws/**", "/ws-native/**").permitAll()
+                .requestMatchers("/ws/**", "/ws-native/**", "/ws-pure").permitAll()
                 
                 // Admin endpoints - temporarily allow any authenticated user for testing
                 .requestMatchers("/api/admin/**").authenticated()  // Changed from hasRole("ADMIN") for testing

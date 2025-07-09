@@ -52,6 +52,7 @@ public class WebSocketJwtAuthInterceptor implements ChannelInterceptor {
      */
     @Override
     public Message<?> preSend(Message<?> message, MessageChannel channel) {
+        log.info("🔄 preSend called - message type: {}", message.getClass().getSimpleName());
         try {
             StompHeaderAccessor accessor = MessageHeaderAccessor.getAccessor(message, StompHeaderAccessor.class);
             
@@ -59,6 +60,7 @@ public class WebSocketJwtAuthInterceptor implements ChannelInterceptor {
                 StompCommand command = accessor.getCommand();
                 log.info("🔄 WebSocket message received - Command: {}", command);
                 log.info("Session ID: {}, User: {}", accessor.getSessionId(), accessor.getUser());
+                log.info("Headers: {}", accessor.toNativeHeaderMap());
                 
                 if (StompCommand.CONNECT.equals(command)) {
                     log.info("🔐 Processing STOMP CONNECT command");
@@ -100,6 +102,8 @@ public class WebSocketJwtAuthInterceptor implements ChannelInterceptor {
                         log.error("❌ SEND command failed: {}", e.getMessage(), e);
                     }
                 }
+            } else {
+                log.warn("⚠️ StompHeaderAccessor is null for message: {}", message.getClass().getSimpleName());
             }
         } catch (Exception e) {
             log.error("❌ Fatal error in preSend: {}", e.getMessage(), e);

@@ -43,6 +43,7 @@
                 <button onclick="connectNative()">Connect Native (JWT)</button>
                 <button onclick="testBasicStomp()">Test Basic STOMP (JWT)</button>
                 <button onclick="connectSimple()">Connect Simple (Fixed)</button>
+                <button onclick="connectDirect()">Connect Direct (Debug)</button>
                 <button onclick="disconnect()">Ngắt kết nối</button>
             </div>
             <div id="connectionStatus" class="status disconnected">Chưa kết nối</div>
@@ -785,6 +786,81 @@
                         onError(error);
                     }
                 );
+            };
+            
+            socket.onclose = function(event) {
+                addMessage('❌ SockJS connection closed: ' + event.code + ' - ' + event.reason, 'error');
+                connected = false;
+                stopHeartbeat();
+                setConnectionStatus('disconnected', 'SockJS connection closed');
+            };
+            
+            socket.onerror = function(error) {
+                addMessage('❌ SockJS error: ' + JSON.stringify(error), 'error');
+                onError(error);
+            };
+        }
+
+        function connectDirect() {
+            const serverUrl = document.getElementById('serverUrl').value;
+            const jwtToken = document.getElementById('jwtToken').value.trim();
+            
+            if (!jwtToken) {
+                addMessage('❌ JWT token is required. Please login first.', 'error');
+                return;
+            }
+            
+            setConnectionStatus('connecting', 'Đang kết nối...');
+            addMessage('🔄 Starting DIRECT WebSocket connection...', 'sent');
+            addMessage('Server URL: ' + serverUrl, 'sent');
+            addMessage('JWT Token: ' + jwtToken.substring(0, 50) + '...', 'sent');
+
+            // Add JWT token to URL as query parameter
+            const socketUrl = serverUrl + '?token=' + encodeURIComponent(jwtToken);
+            addMessage('Socket URL: ' + socketUrl.substring(0, 100) + '...', 'sent');
+            
+            const socket = new SockJS(socketUrl);
+            
+            socket.onopen = function() {
+                addMessage('✅ SockJS connection opened - creating STOMP client immediately', 'received');
+                
+                // Create STOMP client immediately
+                stompClient = Stomp.over(socket);
+                
+                // Enable debug logging
+                stompClient.debug = function(str) {
+                    console.log('STOMP DEBUG: ' + str);
+                    addMessage('STOMP: ' + str, 'received');
+                };
+                
+                // Headers with JWT token
+                const headers = {
+                    'Authorization': 'Bearer ' + jwtToken,
+                    'token': jwtToken,
+                    'accept-version': '1.0,1.1,1.2',
+                    'heart-beat': '0,0'
+                };
+
+                addMessage('🔄 Calling stompClient.connect() NOW...', 'sent');
+                
+                // Connect STOMP immediately - no timeout or delay
+                try {
+                    stompClient.connect(headers, 
+                        function(frame) {
+                            addMessage('✅ STOMP connected successfully!', 'received');
+                            addMessage('Frame: ' + JSON.stringify(frame), 'received');
+                            onConnected(frame);
+                        },
+                        function(error) {
+                            addMessage('❌ STOMP connection failed: ' + error, 'error');
+                            onError(error);
+                        }
+                    );
+                    addMessage('✅ stompClient.connect() called successfully', 'received');
+                } catch (error) {
+                    addMessage('❌ Error calling stompClient.connect(): ' + error.message, 'error');
+                    onError(error);
+                }
             };
             
             socket.onclose = function(event) {

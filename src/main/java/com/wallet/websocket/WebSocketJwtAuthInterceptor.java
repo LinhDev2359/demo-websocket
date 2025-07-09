@@ -52,37 +52,58 @@ public class WebSocketJwtAuthInterceptor implements ChannelInterceptor {
      */
     @Override
     public Message<?> preSend(Message<?> message, MessageChannel channel) {
-        StompHeaderAccessor accessor = MessageHeaderAccessor.getAccessor(message, StompHeaderAccessor.class);
-        
-        if (accessor != null) {
-            StompCommand command = accessor.getCommand();
-            log.info("WebSocket message received - Command: {}", command);
+        try {
+            StompHeaderAccessor accessor = MessageHeaderAccessor.getAccessor(message, StompHeaderAccessor.class);
             
-            if (StompCommand.CONNECT.equals(command)) {
-                try {
-                    handleConnect(accessor);
-                    log.info("✅ CONNECT command processed successfully");
-                } catch (Exception e) {
-                    log.error("❌ CONNECT command failed: {}", e.getMessage(), e);
-                    // Don't return null - let the message proceed
-                }
-            } else if (StompCommand.SUBSCRIBE.equals(command)) {
-                try {
-                    handleSubscribe(accessor);
-                    log.info("✅ SUBSCRIBE command processed successfully");
-                } catch (Exception e) {
-                    log.error("❌ SUBSCRIBE command failed: {}", e.getMessage(), e);
-                    // Don't return null - let the message proceed
-                }
-            } else if (StompCommand.SEND.equals(command)) {
-                try {
-                    handleSend(accessor);
-                    log.info("✅ SEND command processed successfully");
-                } catch (Exception e) {
-                    log.error("❌ SEND command failed: {}", e.getMessage(), e);
-                    // Don't return null - let the message proceed
+            if (accessor != null) {
+                StompCommand command = accessor.getCommand();
+                log.info("🔄 WebSocket message received - Command: {}", command);
+                log.info("Session ID: {}, User: {}", accessor.getSessionId(), accessor.getUser());
+                
+                if (StompCommand.CONNECT.equals(command)) {
+                    log.info("🔐 Processing STOMP CONNECT command");
+                    
+                    // Check if already authenticated to prevent duplicate processing
+                    if (accessor.getUser() != null) {
+                        log.info("User already authenticated: {}, skipping CONNECT processing", accessor.getUser().getName());
+                        return message;
+                    }
+                    
+                    try {
+                        log.info("🔄 Starting JWT authentication for CONNECT");
+                        handleConnect(accessor);
+                        log.info("✅ CONNECT command processed successfully");
+                    } catch (Exception e) {
+                        log.error("❌ CONNECT command failed: {}", e.getMessage(), e);
+                        // Don't throw - this may be causing immediate disconnection
+                        // Instead, create a temporary user
+                        WebSocketUserPrincipal tempPrincipal = new WebSocketUserPrincipal("temp_user", "temp_user");
+                        accessor.setUser(tempPrincipal);
+                        accessor.getSessionAttributes().put("userId", "temp_user");
+                        accessor.getSessionAttributes().put("username", "temp_user");
+                        accessor.getSessionAttributes().put("authenticated", false);
+                        accessor.getSessionAttributes().put("auth_failed", true);
+                        log.warn("Created temporary user due to authentication failure");
+                    }
+                } else if (StompCommand.SUBSCRIBE.equals(command)) {
+                    try {
+                        handleSubscribe(accessor);
+                        log.info("✅ SUBSCRIBE command processed successfully");
+                    } catch (Exception e) {
+                        log.error("❌ SUBSCRIBE command failed: {}", e.getMessage(), e);
+                    }
+                } else if (StompCommand.SEND.equals(command)) {
+                    try {
+                        handleSend(accessor);
+                        log.info("✅ SEND command processed successfully");
+                    } catch (Exception e) {
+                        log.error("❌ SEND command failed: {}", e.getMessage(), e);
+                    }
                 }
             }
+        } catch (Exception e) {
+            log.error("❌ Fatal error in preSend: {}", e.getMessage(), e);
+            // Return message anyway to prevent connection close
         }
         
         return message;
@@ -93,7 +114,18 @@ public class WebSocketJwtAuthInterceptor implements ChannelInterceptor {
      * Validate JWT token và setup authentication
      */
     private void handleConnect(StompHeaderAccessor accessor) {
-        log.info("Processing WebSocket CONNECT command");
+        log.info("🔐 Processing WebSocket CONNECT command");
+        String sessionId = accessor.getSessionId();
+        log.info("Session ID: {}", sessionId);
+        
+        // Debug session attributes
+        if (accessor.getSessionAttributes() != null) {
+            log.info("Session attributes available: {}", accessor.getSessionAttributes().keySet());
+            Object token = accessor.getSessionAttributes().get("token");
+            log.info("Token in session attributes: {}", token != null ? "YES" : "NO");
+        } else {
+            log.warn("No session attributes available");
+        }
         
         try {
             // Get JWT token from headers
@@ -102,15 +134,47 @@ public class WebSocketJwtAuthInterceptor implements ChannelInterceptor {
             
             if (authToken != null) {
                 log.info("Validating JWT token...");
-                boolean isValid = jwtTokenUtil.validateToken(authToken);
-                log.info("JWT token validation result: {}", isValid);
+                log.info("Token starts with: {}", authToken.substring(0, Math.min(20, authToken.length())));
                 
-                if (isValid) {
-                    // Extract user information
-                    String username = jwtTokenUtil.getUsernameFromToken(authToken);
-                    String userId = jwtTokenUtil.getUserIdFromToken(authToken);
-                    
+                boolean isValid = false;
+                String username = null;
+                String userId = null;
+                
+                try {
+                    // First try to extract user info to see if token is structurally valid
+                    username = jwtTokenUtil.getUsernameFromToken(authToken);
+                    userId = jwtTokenUtil.getUserIdFromToken(authToken);
                     log.info("Extracted user info - Username: {}, UserID: {}", username, userId);
+                    
+                    // Then validate the token
+                    isValid = jwtTokenUtil.validateToken(authToken);
+                    log.info("JWT token validation result: {}", isValid);
+                    
+                    if (!isValid) {
+                        log.warn("⚠️ JWT token validation failed but token structure is valid");
+                        log.warn("This might be due to token expiration or signature mismatch");
+                        
+                        // Check if token is expired
+                        try {
+                            java.util.Date expiration = jwtTokenUtil.getExpirationDateFromToken(authToken);
+                            java.util.Date now = new java.util.Date();
+                            if (expiration.before(now)) {
+                                log.error("❌ JWT token is expired. Expires: {}, Now: {}", expiration, now);
+                            } else {
+                                log.warn("⚠️ JWT token is not expired but validation failed - possible signature issue");
+                            }
+                        } catch (Exception expE) {
+                            log.error("❌ Could not check token expiration: {}", expE.getMessage());
+                        }
+                    }
+                    
+                } catch (Exception e) {
+                    log.error("❌ JWT token parsing failed: {}", e.getMessage(), e);
+                    log.error("Token content (first 50 chars): {}", authToken.substring(0, Math.min(50, authToken.length())));
+                    isValid = false;
+                }
+                
+                if (isValid && username != null && userId != null) {
                     
                     // Create authentication object
                     List<SimpleGrantedAuthority> authorities = Collections.singletonList(
@@ -136,25 +200,63 @@ public class WebSocketJwtAuthInterceptor implements ChannelInterceptor {
                     log.info("✅ WebSocket connection authenticated for user: {} (ID: {})", username, userId);
                     return; // Success - exit early
                 } else {
-                    log.warn("❌ JWT token validation failed");
+                    log.error("❌ JWT token validation failed or missing user information");
                 }
             } else {
                 log.warn("❌ No JWT token found in any headers or session attributes");
             }
             
-            // If we reach here, authentication failed
-            log.error("❌ WebSocket authentication failed - no valid token found");
-            // Set a default user to allow connection
-            WebSocketUserPrincipal defaultPrincipal = new WebSocketUserPrincipal("anonymous", "anonymous");
-            accessor.setUser(defaultPrincipal);
-            accessor.getSessionAttributes().put("authenticated", false);
+            // Special handling for SockJS fallback transports
+            // These connections don't have JWT tokens but are needed for SockJS negotiation
+            if (sessionId != null) {
+                // Check if this is a SockJS fallback connection by checking session attributes
+                Object sessionAttributes = accessor.getSessionAttributes();
+                if (sessionAttributes != null) {
+                    // For SockJS fallback, create a temporary unauthenticated user
+                    // The real authentication will happen when the actual WebSocket connection is established
+                    log.info("Creating temporary user for SockJS fallback connection: {}", sessionId);
+                    WebSocketUserPrincipal tempPrincipal = new WebSocketUserPrincipal("sockjs_temp", "sockjs_temp");
+                    accessor.setUser(tempPrincipal);
+                    accessor.getSessionAttributes().put("userId", "sockjs_temp");
+                    accessor.getSessionAttributes().put("username", "sockjs_temp");
+                    accessor.getSessionAttributes().put("authenticated", false);
+                    accessor.getSessionAttributes().put("sockjs_fallback", true);
+                    return;
+                }
+            }
             
+            // If we reach here, authentication failed for a real WebSocket connection
+            log.error("❌ WebSocket authentication failed - no valid token found");
+            // Don't throw exception to prevent immediate disconnection
+            // Instead, create a guest user to allow basic functionality
+            WebSocketUserPrincipal guestPrincipal = new WebSocketUserPrincipal("guest_user", "guest_user");
+            accessor.setUser(guestPrincipal);
+            accessor.getSessionAttributes().put("userId", "guest_user");
+            accessor.getSessionAttributes().put("username", "guest_user");
+            accessor.getSessionAttributes().put("authenticated", false);
+            accessor.getSessionAttributes().put("auth_failed", true);
+            log.warn("Created guest user due to authentication failure - connection will proceed with limited functionality");
+            
+        } catch (SecurityException e) {
+            log.error("❌ WebSocket security exception: {}", e.getMessage());
+            // Don't throw - create fallback user instead
+            WebSocketUserPrincipal errorPrincipal = new WebSocketUserPrincipal("error_user", "error_user");
+            accessor.setUser(errorPrincipal);
+            accessor.getSessionAttributes().put("userId", "error_user");
+            accessor.getSessionAttributes().put("username", "error_user");
+            accessor.getSessionAttributes().put("authenticated", false);
+            accessor.getSessionAttributes().put("auth_error", true);
+            log.warn("Created error user due to security exception - connection will proceed with limited functionality");
         } catch (Exception e) {
             log.error("❌ WebSocket authentication failed with exception: {}", e.getMessage(), e);
-            // Set a default user to allow connection
-            WebSocketUserPrincipal defaultPrincipal = new WebSocketUserPrincipal("anonymous", "anonymous");
-            accessor.setUser(defaultPrincipal);
+            // Don't throw - create fallback user instead
+            WebSocketUserPrincipal errorPrincipal = new WebSocketUserPrincipal("error_user", "error_user");
+            accessor.setUser(errorPrincipal);
+            accessor.getSessionAttributes().put("userId", "error_user");
+            accessor.getSessionAttributes().put("username", "error_user");
             accessor.getSessionAttributes().put("authenticated", false);
+            accessor.getSessionAttributes().put("auth_error", true);
+            log.warn("Created error user due to exception - connection will proceed with limited functionality: {}", e.getMessage());
         }
     }
 
@@ -169,6 +271,14 @@ public class WebSocketJwtAuthInterceptor implements ChannelInterceptor {
         if (user instanceof WebSocketUserPrincipal) {
             WebSocketUserPrincipal principal = (WebSocketUserPrincipal) user;
             String userId = principal.getUserId();
+            
+            // Check if this is a SockJS fallback connection
+            Boolean isSockJsFallback = (Boolean) accessor.getSessionAttributes().get("sockjs_fallback");
+            if (Boolean.TRUE.equals(isSockJsFallback)) {
+                log.debug("SockJS fallback connection attempting to subscribe to: {}", destination);
+                // Allow subscription but mark as unauthenticated
+                return;
+            }
             
             log.debug("User {} subscribing to destination: {}", userId, destination);
             
@@ -197,6 +307,14 @@ public class WebSocketJwtAuthInterceptor implements ChannelInterceptor {
             WebSocketUserPrincipal principal = (WebSocketUserPrincipal) user;
             String userId = principal.getUserId();
             
+            // Check if this is a SockJS fallback connection
+            Boolean isSockJsFallback = (Boolean) accessor.getSessionAttributes().get("sockjs_fallback");
+            if (Boolean.TRUE.equals(isSockJsFallback)) {
+                log.warn("❌ SockJS fallback connection attempting to send to: {}", destination);
+                // Block sending from unauthenticated connections
+                throw new SecurityException("Unauthenticated connection cannot send messages");
+            }
+            
             log.debug("User {} sending message to: {}", userId, destination);
             
             // Validate user có quyền send đến destination này không
@@ -219,14 +337,22 @@ public class WebSocketJwtAuthInterceptor implements ChannelInterceptor {
         
         // First try session attributes (from URL params)
         if (accessor.getSessionAttributes() != null) {
+            log.info("Session attributes keys: {}", accessor.getSessionAttributes().keySet());
             String tokenFromSession = (String) accessor.getSessionAttributes().get("token");
             if (tokenFromSession != null) {
                 log.info("✅ Found JWT token in session attributes (from URL)");
+                log.info("Token length: {}, starts with: {}", tokenFromSession.length(), 
+                        tokenFromSession.substring(0, Math.min(20, tokenFromSession.length())));
                 return tokenFromSession;
+            } else {
+                log.warn("No 'token' key found in session attributes");
             }
+        } else {
+            log.warn("Session attributes is null");
         }
         
         // Try to get from STOMP native headers
+        log.info("STOMP native headers: {}", accessor.toNativeHeaderMap());
         String authHeader = accessor.getFirstNativeHeader("Authorization");
         log.info("Authorization header: {}", authHeader != null ? "FOUND" : "NOT FOUND");
         
@@ -309,12 +435,25 @@ public class WebSocketJwtAuthInterceptor implements ChannelInterceptor {
     public void postSend(Message<?> message, MessageChannel channel, boolean sent) {
         StompHeaderAccessor accessor = MessageHeaderAccessor.getAccessor(message, StompHeaderAccessor.class);
         
-        if (accessor != null && StompCommand.DISCONNECT.equals(accessor.getCommand())) {
-            Principal user = accessor.getUser();
-            if (user instanceof WebSocketUserPrincipal) {
-                WebSocketUserPrincipal principal = (WebSocketUserPrincipal) user;
-                log.info("🔌 WebSocket disconnected for user: {} (ID: {})", 
-                        principal.getUsername(), principal.getUserId());
+        if (accessor != null) {
+            StompCommand command = accessor.getCommand();
+            
+            if (StompCommand.DISCONNECT.equals(command)) {
+                Principal user = accessor.getUser();
+                if (user instanceof WebSocketUserPrincipal) {
+                    WebSocketUserPrincipal principal = (WebSocketUserPrincipal) user;
+                    log.info("🔌 WebSocket disconnected for user: {} (ID: {})", 
+                            principal.getUsername(), principal.getUserId());
+                } else {
+                    log.info("🔌 WebSocket disconnected for unauthenticated session");
+                }
+            } else if (StompCommand.CONNECTED.equals(command)) {
+                Principal user = accessor.getUser();
+                if (user instanceof WebSocketUserPrincipal) {
+                    WebSocketUserPrincipal principal = (WebSocketUserPrincipal) user;
+                    log.info("🟢 WebSocket CONNECTED for user: {} (ID: {})", 
+                            principal.getUsername(), principal.getUserId());
+                }
             }
         }
     }

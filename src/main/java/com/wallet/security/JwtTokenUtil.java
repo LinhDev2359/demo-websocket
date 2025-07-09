@@ -50,13 +50,27 @@ public class JwtTokenUtil {
     // Token types
     private static final String ACCESS_TOKEN = "ACCESS";
     private static final String REFRESH_TOKEN = "REFRESH";
-
+    
     /**
-     * Tạo secret key từ string secret
-     * Đảm bảo secret đủ mạnh cho JWT signing
+     * Get signing key from secret
+     * @return SecretKey for signing
      */
     private SecretKey getSigningKey() {
-        return Keys.hmacShaKeyFor(secret.getBytes());
+        try {
+            // Use consistent key derivation - no padding to avoid key mismatch issues
+            byte[] keyBytes = secret.getBytes(java.nio.charset.StandardCharsets.UTF_8);
+            
+            // Log key info for debugging
+            log.debug("JWT secret length: {} bytes", keyBytes.length);
+            log.debug("JWT secret starts with: {}", secret.length() > 10 ? secret.substring(0, 10) + "..." : secret);
+            
+            // For HS512, we need at least 64 bytes. If the secret is shorter, use it as-is
+            // and let the JWT library handle it appropriately
+            return Keys.hmacShaKeyFor(keyBytes);
+        } catch (Exception e) {
+            log.error("Error creating signing key: {}", e.getMessage());
+            throw new RuntimeException("Failed to create JWT signing key", e);
+        }
     }
 
     /**

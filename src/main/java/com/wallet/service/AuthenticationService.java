@@ -206,14 +206,25 @@ public class AuthenticationService {
         
         // Token information
         response.put("accessToken", accessToken);
+        response.put("token", accessToken); // For backward compatibility
         response.put("refreshToken", refreshToken);
         response.put("tokenType", "Bearer");
         response.put("expiresIn", 86400); // 24 hours in seconds
+        
+        // Extract userId if available
+        String userId = null;
+        if (userDetails instanceof CustomUserPrincipal) {
+            userId = ((CustomUserPrincipal) userDetails).getUserId();
+            response.put("userId", userId);
+        }
         
         // User information
         Map<String, Object> userInfo = new HashMap<>();
         userInfo.put("username", userDetails.getUsername());
         userInfo.put("authorities", userDetails.getAuthorities());
+        if (userId != null) {
+            userInfo.put("userId", userId);
+        }
         response.put("user", userInfo);
         
         return response;

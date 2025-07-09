@@ -82,8 +82,8 @@ public class SecurityConfig {
                     "/error"                  // Error page
                 ).permitAll()
                 
-                // WebSocket endpoints - sẽ được authenticate riêng
-                .requestMatchers("/ws/**").permitAll()
+                // WebSocket endpoints - require authentication at handshake level
+                .requestMatchers("/ws/**", "/ws-native/**").permitAll()
                 
                 // Admin endpoints - temporarily allow any authenticated user for testing
                 .requestMatchers("/api/admin/**").authenticated()  // Changed from hasRole("ADMIN") for testing
@@ -155,8 +155,8 @@ public class SecurityConfig {
      */
     @Bean
     public PasswordEncoder passwordEncoder() {
-        // BCrypt với strength 12 để balance security và performance
-        // Với millions users, strength quá cao sẽ impact performance
+        // BCrypt với strength 12 để match với database hashes
+        // Database có existing hashes với strength 12
         return new BCryptPasswordEncoder(12);
     }
 

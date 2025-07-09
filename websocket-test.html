@@ -42,6 +42,7 @@
                 <button onclick="connectWithJWT()">Connect (JWT Full)</button>
                 <button onclick="connectNative()">Connect Native (JWT)</button>
                 <button onclick="testBasicStomp()">Test Basic STOMP (JWT)</button>
+                <button onclick="connectSimple()">Connect Simple (Fixed)</button>
                 <button onclick="disconnect()">Ngắt kết nối</button>
             </div>
             <div id="connectionStatus" class="status disconnected">Chưa kết nối</div>
@@ -171,36 +172,41 @@
             };
 
             // Wait for SockJS to be fully ready before starting STOMP
-            setTimeout(() => {
-                // Add connection timeout
-                const connectTimeout = setTimeout(() => {
-                    if (!connected) {
-                        addMessage('❌ Connection timeout - taking too long to connect', 'error');
-                        setConnectionStatus('disconnected', 'Connection timeout');
-                        if (stompClient) {
-                            stompClient.disconnect();
+            socket.onopen = function() {
+                addMessage('✅ SockJS connection opened', 'received');
+                
+                setTimeout(() => {
+                    addMessage('🔄 Starting STOMP connection...', 'sent');
+                    
+                    // Add connection timeout
+                    const connectTimeout = setTimeout(() => {
+                        if (!connected) {
+                            addMessage('❌ Connection timeout - taking too long to connect', 'error');
+                            setConnectionStatus('disconnected', 'Connection timeout');
+                            if (stompClient) {
+                                stompClient.disconnect();
+                            }
                         }
-                    }
-                }, 30000); // 30 second timeout
+                    }, 30000); // 30 second timeout
 
-                addMessage('🔄 Starting STOMP connection...', 'sent');
-                try {
-                    stompClient.connect(headers, (frame) => {
+                    try {
+                        stompClient.connect(headers, (frame) => {
+                            clearTimeout(connectTimeout);
+                            addMessage('✅ STOMP connected successfully!', 'received');
+                            onConnected(frame);
+                        }, (error) => {
+                            clearTimeout(connectTimeout);
+                            addMessage('❌ STOMP connection failed: ' + error, 'error');
+                            onError(error);
+                        });
+                    } catch (error) {
                         clearTimeout(connectTimeout);
-                        addMessage('✅ STOMP connected successfully!', 'received');
-                        onConnected(frame);
-                    }, (error) => {
-                        clearTimeout(connectTimeout);
-                        addMessage('❌ STOMP connection failed: ' + error, 'error');
+                        addMessage('❌ Error during STOMP connect: ' + error.message, 'error');
+                        console.error('STOMP connect error:', error);
                         onError(error);
-                    });
-                } catch (error) {
-                    clearTimeout(connectTimeout);
-                    addMessage('❌ Error during STOMP connect: ' + error.message, 'error');
-                    console.error('STOMP connect error:', error);
-                    onError(error);
-                }
-            }, 1000); // 1 second delay to ensure SockJS is fully ready
+                    }
+                }, 1000); // 1 second delay to ensure SockJS is fully ready
+            };
         }
 
         function connectWithJWT() {
@@ -725,6 +731,73 @@
                 addMessage('❌ Token refresh failed: ' + error.message, 'error');
                 addMessage('💡 Try logging in again to get a new token', 'received');
             });
+        }
+
+        function connectSimple() {
+            const serverUrl = document.getElementById('serverUrl').value;
+            const jwtToken = document.getElementById('jwtToken').value.trim();
+            
+            if (!jwtToken) {
+                addMessage('❌ JWT token is required. Please login first.', 'error');
+                return;
+            }
+            
+            setConnectionStatus('connecting', 'Đang kết nối...');
+            addMessage('🔄 Starting simple WebSocket connection...', 'sent');
+            addMessage('Server URL: ' + serverUrl, 'sent');
+            addMessage('JWT Token: ' + jwtToken.substring(0, 50) + '...', 'sent');
+
+            // Add JWT token to URL as query parameter
+            const socketUrl = serverUrl + '?token=' + encodeURIComponent(jwtToken);
+            const socket = new SockJS(socketUrl);
+            
+            socket.onopen = function() {
+                addMessage('✅ SockJS connection opened', 'received');
+                
+                // Create STOMP client
+                stompClient = Stomp.over(socket);
+                
+                // Enable debug logging
+                stompClient.debug = function(str) {
+                    console.log('STOMP DEBUG: ' + str);
+                    addMessage('STOMP: ' + str, 'received');
+                };
+                
+                // Headers with JWT token
+                const headers = {
+                    'Authorization': 'Bearer ' + jwtToken,
+                    'token': jwtToken,
+                    'accept-version': '1.0,1.1,1.2',
+                    'heart-beat': '0,0'
+                };
+
+                addMessage('🔄 Starting STOMP connection with headers: ' + JSON.stringify(headers), 'sent');
+                
+                // Connect STOMP
+                stompClient.connect(headers, 
+                    function(frame) {
+                        addMessage('✅ STOMP connected successfully!', 'received');
+                        addMessage('Frame: ' + JSON.stringify(frame), 'received');
+                        onConnected(frame);
+                    },
+                    function(error) {
+                        addMessage('❌ STOMP connection failed: ' + error, 'error');
+                        onError(error);
+                    }
+                );
+            };
+            
+            socket.onclose = function(event) {
+                addMessage('❌ SockJS connection closed: ' + event.code + ' - ' + event.reason, 'error');
+                connected = false;
+                stopHeartbeat();
+                setConnectionStatus('disconnected', 'SockJS connection closed');
+            };
+            
+            socket.onerror = function(error) {
+                addMessage('❌ SockJS error: ' + JSON.stringify(error), 'error');
+                onError(error);
+            };
         }
 
         function onConnected(frame) {
